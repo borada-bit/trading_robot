@@ -15,17 +15,19 @@ def init_client() -> Optional[Client]:
         return None
 
 
-def make_order_at_price(client: Client, symbol: str, qty: float, price: float) -> bool:
+def make_order_at_price(client: Client, symbol: str, quantity: float, price: float) -> bool:
     order_completed = False
     try:
-        order = client.create_order(
+        response = client.create_order(
             symbol=symbol,
             side=SIDE_BUY,
             type=ORDER_TYPE_LIMIT,
             timeInForce=TIME_IN_FORCE_GTC,
-            quantity=qty,
-            price=price)
-
+            quantity=quantity,
+            price=price,
+            newOrderRespType=ORDER_RESP_TYPE_ACK
+        )
+        print(f"{response=}")
         order_completed = True
     except exceptions.BinanceAPIException as e:
         print(f"Error executing order {e.message}")
