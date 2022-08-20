@@ -34,6 +34,16 @@ def make_order_at_price(client: Client, symbol: str, quantity: float, price: flo
 
     return order_completed
 
+# Prints each asset balance
+def print_balances(client: Client) -> None:
+    balances = client.get_account()['balances']
+
+    for balance in balances:
+        print(f"{balance}")
+
+    pass
+
+
 def main():
     client = init_client()
 
