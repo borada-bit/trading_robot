@@ -2,6 +2,8 @@ from typing import Optional
 
 from binance import Client, exceptions
 from binance.enums import *
+from inputimeout import inputimeout, TimeoutOccurred
+
 import config
 
 
@@ -55,8 +57,44 @@ def print_balances(client: Client) -> None:
     pass
 
 
+def print_menu():
+    print("""
+    1. Print balances.
+    2. Print orders for symbol.
+    ----------------------------------
+    9. Print menu.
+    0. Quit.""")
+
+
 def main():
     client = init_client()
+
+    print_menu()
+    quit_loop = False
+    while not quit_loop:
+        try:
+            user_string = inputimeout(prompt='>>', timeout=config.TIMEOUT)
+        except TimeoutOccurred:
+            user_string = "1"
+
+        choice = -1
+        try:
+            choice = int(user_string)
+        except TypeError and ValueError:
+            print("Entered option is invalid!")
+
+        if choice == 0:
+            print("Quiting!")
+            quit_loop = True
+        elif choice == 1:
+            print_balances(client)
+        elif choice == 2:
+            symbol = input("Enter symbol: ")
+            print_symbol_orders(client, symbol=symbol)
+        elif choice == 9:
+            print_menu()
+        else:
+            pass
 
 
 
