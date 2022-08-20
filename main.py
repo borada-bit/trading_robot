@@ -7,8 +7,8 @@ from inputimeout import inputimeout, TimeoutOccurred
 import config
 
 
-def init_client() -> Optional[Client]:
-    client = Client(config.api_key, config.api_secret, testnet=True)
+def init_client(api_key: str, api_secret: str) -> Optional[Client]:
+    client = Client(api_key, api_secret, testnet=True)
     try:
         client.ping()
         return client
@@ -67,7 +67,7 @@ def print_menu():
 
 
 def main():
-    client = init_client()
+    client = init_client(config.api_key, config.api_secret)
 
     print_menu()
     quit_loop = False
