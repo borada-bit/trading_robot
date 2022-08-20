@@ -17,6 +17,7 @@ def init_client(api_key: str, api_secret: str) -> Optional[Client]:
         return None
 
 
+# makes order at given price and returns result if successful or not
 def make_order_at_price(client: Client, symbol: str, quantity: float, price: float) -> bool:
     order_completed = False
     try:
@@ -32,27 +33,32 @@ def make_order_at_price(client: Client, symbol: str, quantity: float, price: flo
         print(f"{response=}")
         order_completed = True
     except exceptions.BinanceAPIException as e:
-        print(f"Error executing order {e.message}")
+        print(f"Error executing order. {e.message}")
 
     return order_completed
 
 
 # prints orders for symbol
 def print_symbol_orders(client: Client, symbol: str) -> None:
+    try:
     orders = client.get_all_orders(symbol=symbol)
     print(f"Orders for {symbol}")
     for order in orders:
         print(f"{order['clientOrderId']=} {order['price']=} {order['executedQty']=} {order['cummulativeQuoteQty']=}")
+    except exceptions.BinanceAPIException as e:
+        print(f"Error getting orders. {e.message}")
 
     pass
 
 
-# Prints each asset balance
+# prints each asset balance
 def print_balances(client: Client) -> None:
+    try:
     balances = client.get_account()['balances']
-
     for balance in balances:
         print(f"{balance}")
+    except exceptions.BinanceAPIException as e:
+        print(f"Error. {e.message}")
 
     pass
 
@@ -73,7 +79,7 @@ def main():
     quit_loop = False
     while not quit_loop:
         try:
-            user_string = inputimeout(prompt='>>', timeout=config.TIMEOUT)
+            user_string = inputimeout(prompt='>> ', timeout=config.TIMEOUT)
         except TimeoutOccurred:
             user_string = "1"
 
