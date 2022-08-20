@@ -34,6 +34,17 @@ def make_order_at_price(client: Client, symbol: str, quantity: float, price: flo
 
     return order_completed
 
+
+# prints orders for symbol
+def print_symbol_orders(client: Client, symbol: str) -> None:
+    orders = client.get_all_orders(symbol=symbol)
+    print(f"Orders for {symbol}")
+    for order in orders:
+        print(f"{order['clientOrderId']=} {order['price']=} {order['executedQty']=} {order['cummulativeQuoteQty']=}")
+
+    pass
+
+
 # Prints each asset balance
 def print_balances(client: Client) -> None:
     balances = client.get_account()['balances']
