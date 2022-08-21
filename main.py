@@ -18,12 +18,12 @@ def init_client(api_key: str, api_secret: str) -> Optional[Client]:
 
 
 # makes order at given price and returns result if successful or not
-def make_order_at_price(client: Client, symbol: str, quantity: float, price: float) -> bool:
+def make_limit_order(client: Client, symbol: str, side: str, quantity: float, price: float) -> bool:
     order_completed = False
     try:
         response = client.create_order(
             symbol=symbol,
-            side=SIDE_BUY,
+            side=side,
             type=ORDER_TYPE_LIMIT,
             timeInForce=TIME_IN_FORCE_GTC,
             quantity=quantity,
