@@ -30,10 +30,10 @@ def make_limit_order(client: Client, symbol: str, side: str, quantity: float, pr
             price=price,
             newOrderRespType=ORDER_RESP_TYPE_ACK
         )
-        print(f"{response=}")
+        print(f"Order {side} {symbol} for {price}. {response=}")
         order_completed = True
     except exceptions.BinanceAPIException as e:
-        print(f"Error executing order. {e.message}")
+        print(f"Error executing order for {symbol}. Order type {side}. Price {price}. {e.message}")
 
     return order_completed
 
