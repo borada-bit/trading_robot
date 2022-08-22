@@ -108,14 +108,12 @@ def main():
     while not quit_loop:
         try:
             user_string = inputimeout(prompt='>> ', timeout=config.TIMEOUT)
-        except TimeoutOccurred:
-            user_string = "1"
-
-        choice = -1
-        try:
             choice = int(user_string)
-        except TypeError and ValueError:
+        except TimeoutOccurred:
+            choice = -9
+        except ValueError:
             print("Entered option is invalid!")
+            continue
 
         if choice == 0:
             print("Quiting!")
