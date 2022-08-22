@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 
 from binance import Client, exceptions
 from binance.enums import *
@@ -70,6 +70,22 @@ def print_menu():
     ----------------------------------
     9. Print menu.
     0. Quit.""")
+
+
+def get_pairs_historic_prices(client: Client, pairs: list, interval: str, limit: int, price_list: List[list]) -> bool:
+    close_price_index = 4
+    success = True
+    try:
+        for i, symbol in enumerate(pairs):
+            klines = client.get_historical_klines(symbol, interval, limit=limit)
+            if price_list[i]:
+                price_list[i].pop()
+            for kline in klines:
+                price_list[i].insert(0, float(kline[close_price_index]))
+    except exceptions.BinanceAPIException as e:
+        success = False
+        print(e.message)
+    return success
 
 
 # returns symbol avg price rounded by ndigits, on error returns -1.0
