@@ -44,7 +44,7 @@ def print_symbol_orders(client: Client, symbol: str) -> None:
     orders = client.get_all_orders(symbol=symbol)
     print(f"Orders for {symbol}")
     for order in orders:
-            print(f"{order['clientOrderId']=} {order['price']=} {order['side']=} {order['cummulativeQuoteQty']=}")
+            print(f"{order['orderId']=} {order['price']=} {order['side']=} {order['cummulativeQuoteQty']=}")
     except exceptions.BinanceAPIException as e:
         print(f"Error getting orders. {e.message}")
 
