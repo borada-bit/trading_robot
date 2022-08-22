@@ -1,10 +1,9 @@
+import json
 from typing import Optional, List
 
 from binance import Client, exceptions
 from binance.enums import *
 from inputimeout import inputimeout, TimeoutOccurred
-
-import config
 
 
 def init_client(api_key: str, api_secret: str) -> Optional[Client]:
@@ -101,8 +100,12 @@ def get_symbol_avg_price(client: Client, symbol: str, ndigits: int) -> float:
 
 
 def main():
-    client = init_client(config.api_key, config.api_secret)
+    with open('config.json', 'r') as config_file:
+        data = json.load(config_file)
 
+    api_key = data['api_key']
+    api_secret = data['api_secret']
+    client = init_client(api_key, api_secret)
     print_menu()
     quit_loop = False
     while not quit_loop:
