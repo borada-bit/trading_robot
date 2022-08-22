@@ -72,6 +72,18 @@ def print_menu():
     0. Quit.""")
 
 
+# returns symbol avg price rounded by ndigits, on error returns -1.0
+def get_symbol_avg_price(client: Client, symbol: str, ndigits: int) -> float:
+    avg_price = -1.0
+    try:
+        avg_price = float(client.get_avg_price(symbol=symbol)['price'])
+        avg_price = round(avg_price, ndigits)
+    except exceptions.BinanceAPIException as e:
+        print(e.message)
+        
+    return avg_price
+
+
 def main():
     client = init_client(config.api_key, config.api_secret)
 
