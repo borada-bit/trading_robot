@@ -1,0 +1,27 @@
+{
+  "BTCBUSD": {
+    "round_precision": 2,
+    "trade_quantity": 0.01,
+    "position": "BUY"
+  },
+  "LTCBUSD": {
+    "round_precision": 2,
+    "trade_quantity": 1,
+    "position": "BUY"
+  },
+  "XRPBUSD": {
+    "round_precision": 4,
+    "trade_quantity": 100,
+    "position": "BUY"
+  },
+  "BNBBTC": {
+    "round_precision": 6,
+    "trade_quantity": 0.1,
+    "position": "BUY"
+  },
+  "ETHBTC": {
+    "round_precision": 6,
+    "trade_quantity": 0.1,
+    "position": "BUY"
+  }
+}
