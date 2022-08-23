@@ -1,51 +1,138 @@
+import json
+from typing import Optional, List
+
 from binance import Client, exceptions
 from binance.enums import *
-import config
+from inputimeout import inputimeout, TimeoutOccurred
+
+
+def init_client(api_key: str, api_secret: str) -> Optional[Client]:
+    client = Client(api_key, api_secret, testnet=True)
+    try:
+        client.ping()
+        return client
+    except exceptions.BinanceAPIException as e:
+        print(f"Error connecting to client. Error code :{e.status_code}. Message: {e.message} Code: {e.code}")
+        return None
+
+
+# makes order at given price and returns result if successful or not
+def make_limit_order(client: Client, symbol: str, side: str, quantity: float, price: float) -> bool:
+    order_completed = False
+    try:
+        response = client.create_order(
+            symbol=symbol,
+            side=side,
+            type=ORDER_TYPE_LIMIT,
+            timeInForce=TIME_IN_FORCE_GTC,
+            quantity=quantity,
+            price=price,
+            newOrderRespType=ORDER_RESP_TYPE_ACK
+        )
+        print(f"Order {side} {symbol} for {price}. {response=}")
+        order_completed = True
+    except exceptions.BinanceAPIException as e:
+        print(f"Error executing order for {symbol}. Order type {side}. Price {price}. {e.message}")
+
+    return order_completed
+
+
+# prints orders for symbol
+def print_symbol_orders(client: Client, symbol: str) -> None:
+    try:
+        orders = client.get_all_orders(symbol=symbol)
+        print(f"Orders for {symbol}")
+        for order in orders:
+                print(f"{order['orderId']=} {order['price']=} {order['side']=} {order['cummulativeQuoteQty']=}")
+    except exceptions.BinanceAPIException as e:
+        print(f"Error getting orders. {e.message}")
+
+    pass
+
+
+# prints each asset balance
+def print_balances(client: Client) -> None:
+    try:
+        balances = client.get_account()['balances']
+        for balance in balances:
+            print(f"{balance}")
+    except exceptions.BinanceAPIException as e:
+        print(f"Error. {e.message}")
+
+    pass
+
+
+def print_menu():
+    print("""
+    1. Print balances.
+    2. Print orders for symbol.
+    ----------------------------------
+    9. Print menu.
+    0. Quit.""")
+
+
+def get_pairs_historic_prices(client: Client, pairs: list, interval: str, limit: int, price_list: List[list]) -> bool:
+    close_price_index = 4
+    success = True
+    try:
+        for i, symbol in enumerate(pairs):
+            klines = client.get_historical_klines(symbol, interval, limit=limit)
+            if price_list[i]:
+                price_list[i].pop()
+            for kline in klines:
+                price_list[i].insert(0, float(kline[close_price_index]))
+    except exceptions.BinanceAPIException as e:
+        success = False
+        print(e.message)
+    return success
+
+
+# returns symbol avg price rounded by ndigits, on error returns -1.0
+def get_symbol_avg_price(client: Client, symbol: str, ndigits: int) -> float:
+    avg_price = -1.0
+    try:
+        avg_price = float(client.get_avg_price(symbol=symbol)['price'])
+        avg_price = round(avg_price, ndigits)
+    except exceptions.BinanceAPIException as e:
+        print(e.message)
+        
+    return avg_price
 
 
 def main():
-    client = Client(config.api_key, config.api_secret)
-    try:
-        client.ping()
-    except exceptions.BinanceAPIException as e:
-        print(f"Error connecting to client. Error code :{e.status_code}. Message: {e.message}")
+    with open('config.json', 'r') as config_file:
+        data = json.load(config_file)
 
-    try:
-        # https://dev.binance.vision/t/what-does-the-percent-price-filter-mean/134
-        info = client.get_symbol_info('ADAEUR')
-        info_price = client.get_symbol_ticker(symbol='ADAEUR')
-        # print(info_price)
-        # print(info['PERCENT_PRICE'])
-        # print(info['filters'][1])
-        val1 = info_price['price']
-        val2 = info['filters'][1]['multiplierDown']
-        print(f"{val1=} and {val2=}")
-        # print(price)
+    api_key = data['api_key']
+    api_secret = data['api_secret']
+    client = init_client(api_key, api_secret)
+    timeout = data['timeout'] 
+    print_menu()
+    quit_loop = False
+    while not quit_loop:
+        try:
+            user_string = inputimeout(prompt='>> ', timeout=timeout)
+            choice = int(user_string)
+        except TimeoutOccurred:
+            choice = -9
+        except ValueError:
+            print("Entered option is invalid!")
+            continue
 
-        buy_loweset_price = float(val1) * float(val2)
-        round(buy_loweset_price, 5)
-        print(buy_loweset_price)
-
-        order = client.create_test_order(
-            symbol='ADAEUR',
-            side=SIDE_BUY,
-            type=ORDER_TYPE_LIMIT,
-            timeInForce=TIME_IN_FORCE_GTC,
-            quantity=100,
-            price="0.5084")
-            # price=str(buy_loweset_price))
-
-        print(order)
-    except exceptions.BinanceAPIException as e:
-        print(f"Error placing test order. Message: {e.message}")
-
-    # print(client.get_account())
-    # print(client.get_asset_balance("ada"))
-    # print(client.get_exchange_info())
-    # cia yra visa info kaip vadinasi tradinami simboliai
-    # print(client.get_orderbook_tickers())
+        if choice == 0:
+            print("Quiting!")
+            quit_loop = True
+        elif choice == 1:
+            print_balances(client)
+        elif choice == 2:
+            symbol = input("Enter symbol: ")
+            print_symbol_orders(client, symbol=symbol)
+        elif choice == 9:
+            print_menu()
+        else:
+            pass
 
 
-# Press the green button in the gutter to run the script.
+
 if __name__ == '__main__':
     main()
