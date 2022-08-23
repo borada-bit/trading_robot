@@ -40,10 +40,10 @@ def make_limit_order(client: Client, symbol: str, side: str, quantity: float, pr
 # prints orders for symbol
 def print_symbol_orders(client: Client, symbol: str) -> None:
     try:
-    orders = client.get_all_orders(symbol=symbol)
-    print(f"Orders for {symbol}")
-    for order in orders:
-            print(f"{order['orderId']=} {order['price']=} {order['side']=} {order['cummulativeQuoteQty']=}")
+        orders = client.get_all_orders(symbol=symbol)
+        print(f"Orders for {symbol}")
+        for order in orders:
+                print(f"{order['orderId']=} {order['price']=} {order['side']=} {order['cummulativeQuoteQty']=}")
     except exceptions.BinanceAPIException as e:
         print(f"Error getting orders. {e.message}")
 
@@ -53,9 +53,9 @@ def print_symbol_orders(client: Client, symbol: str) -> None:
 # prints each asset balance
 def print_balances(client: Client) -> None:
     try:
-    balances = client.get_account()['balances']
-    for balance in balances:
-        print(f"{balance}")
+        balances = client.get_account()['balances']
+        for balance in balances:
+            print(f"{balance}")
     except exceptions.BinanceAPIException as e:
         print(f"Error. {e.message}")
 
@@ -106,11 +106,12 @@ def main():
     api_key = data['api_key']
     api_secret = data['api_secret']
     client = init_client(api_key, api_secret)
+    timeout = data['timeout'] 
     print_menu()
     quit_loop = False
     while not quit_loop:
         try:
-            user_string = inputimeout(prompt='>> ', timeout=config.TIMEOUT)
+            user_string = inputimeout(prompt='>> ', timeout=timeout)
             choice = int(user_string)
         except TimeoutOccurred:
             choice = -9
