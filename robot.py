@@ -1,60 +1,67 @@
 import json
 
 from statistics import mean
+
 from jsonschema import validate
 from jsonschema.exceptions import ValidationError
 from inputimeout import inputimeout, TimeoutOccurred
 
 from binance import Client, exceptions
-from binance.enums import *
 from binance.helpers import round_step_size
 
 
 def print_menu():
-    # TODO: decide if menu is needed at all!
     print("""
     1. Print balances.
     2. Print orders for symbol.
     3. Print symbols positions.
     4. Print order.
     5. Cancel order manually.
+    6. Print symbol price filter.
     ----------------------------------
     9. Print menu.
     0. Quit.""")
     pass
 
 
+CONFIG_FILE_NAME = 'config.json'
+PAIRS_FILE_NAME = 'pairs.json'
+
+MENU_START_INDEX = 0
+MENU_END_INDEX = 9
+MENU_TRADE_INDEX = -1
+
+
 class Robot:
+    MIN_PAIRS = 1
+    MAX_PAIRS = 5
+
     def __init__(self):
-        # TODO: make file names some kind of constant
-        with open("config.json", 'r') as config_file:
+        with open(CONFIG_FILE_NAME, 'r') as config_file:
             data = json.load(config_file)
             validate(instance=data, schema=config_schema)
-            self.client = Client(data['api_key'], data['api_secret'], testnet=True)
-            self.long_term = data['long_term']
-            self.short_term = data['short_term']
-            if self.short_term >= self.long_term:
+            self._client = Client(data['api_key'], data['api_secret'], testnet=True)
+            self._long_term = data['long_term']
+            self._short_term = data['short_term']
+            if self._short_term >= self._long_term:
                 raise ValidationError(message="Short term should be lower than long term!")
-            self.timeout = data['timeout']
-            self.interval = data['interval']
-            self.order_type = data['order_type']
-            self.time_in_force = data['time_in_force']
+            self._timeout = data['timeout']
+            self._interval = data['interval']
 
-        with open('pairs.json', 'r') as pairs_file:
-            data: dict = json.load(pairs_file)
+        with open(PAIRS_FILE_NAME, 'r') as pairs_file:
+            data = json.load(pairs_file)
             validate(instance=data, schema=pairs_schema)
-            self.pairs_config = data
+            self._pairs_config = data
 
-        self.pairs_data = {key: {} for key in self.pairs_config}
-        for key in self.pairs_data.keys():
-            # poh ir tiesiog visada pasiimt is serverio afdru reikes stop limit daryt?
-            self.pairs_data[key]['tick_size'] = self._get_ticksize(key)
-            self.pairs_data[key]['long_sma'] = None
-            self.pairs_data[key]['short_sma'] = None
-            self.pairs_data[key]['price_list'] = []
+        self._pairs_data = {key: {} for key in self._pairs_config}
+        for symbol in self._pairs_data.keys():
+            self._pairs_data[symbol]['tick_size'] = self._get_ticksize(symbol)
+            self._pairs_data[symbol]['long_sma'] = None
+            self._pairs_data[symbol]['short_sma'] = None
+            self._pairs_data[symbol]['price_list'] = []
 
     def run(self) -> None:
-        self._get_historic_prices(limit=self.long_term)
+        self._get_historic_prices(limit=self._long_term)
         self._calculate_sma()
         print_menu()
         quit_loop = False
@@ -74,9 +81,11 @@ class Robot:
                 self._print_symbol_order()
             elif choice == 5:
                 self._cancel_order()
+            elif choice == 6:
+                self._print_symbol_info()
             elif choice == 9:
                 print_menu()
-            elif choice == -1:
+            elif choice == MENU_TRADE_INDEX:
                 self._try_trade()
             else:
                 pass
@@ -84,24 +93,23 @@ class Robot:
 
     # HELPER FUNC START
     def _calculate_sma(self) -> None:
-        for i, key in enumerate(self.symbols_data.keys()):
-            self.symbols_data[key]['long_sma'] = mean(self.price_list[i])
-            self.symbols_data[key]['short_sma'] = mean(self.price_list[i][0:self.short_term])
+        for symbol in self._pairs_data:
+            self._pairs_data[symbol]['long_sma'] = mean(self._pairs_data[symbol]['price_list'])
+            self._pairs_data[symbol]['short_sma'] = mean(self._pairs_data[symbol]['price_list'][0:self._short_term])
         pass
 
     def _get_choice(self) -> int:
         try:
-            user_string = inputimeout(prompt='>> ', timeout=self.timeout)
+            user_string = inputimeout(prompt='>> ', timeout=self._timeout)
             choice = int(user_string)
-            # TODO: make these constant
-            if choice < 0 or choice > 9:
+            if choice < MENU_START_INDEX or choice > MENU_END_INDEX:
                 raise ValueError()
-            return choice
         except TimeoutOccurred:
-            return -1
+            choice = MENU_TRADE_INDEX
         except ValueError:
             print("Entered option is invalid!")
-            return 9
+            choice = MENU_END_INDEX
+        return choice
 
     def _try_trade(self) -> None:
         klines = 1
@@ -111,18 +119,18 @@ class Robot:
         pass
 
     def _check_opportunity(self) -> None:
-        for key, value in self.pairs_data.items():
-            # if short_sma > long_sma : buy ? sell
+        for key, value in self._pairs_config.items():
             position = value['position']
-            long_sma = self.symbols_data[key]['long_sma']
-            short_sma = self.symbols_data[key]['short_sma']
-            # TODO: check if qty is valid depending on price filter and etc.
+            long_sma = self._pairs_data[key]['long_sma']
+            short_sma = self._pairs_data[key]['short_sma']
+            price = None
+            if value['order_type'] == Client.ORDER_TYPE_LIMIT:
+                price = self._get_symbol_avg_price(key)
             if short_sma > long_sma and position == 'BUY':
-                if self._make_order(key, position, value['trade_quantity']):
-                    # TODO: check if this change object data instead of local variable
+                if self._make_order(key, position, value['trade_quantity'], price):
                     value['position'] = 'SELL'
             elif short_sma < long_sma and position == 'SELL':
-                if self._make_order(key, position, value['trade_quantity']):
+                if self._make_order(key, position, value['trade_quantity'], price):
                     value['position'] = 'BUY'
         pass
 
@@ -131,122 +139,91 @@ class Robot:
     # GETTERS START
     def _get_historic_prices(self, limit: int) -> None:
         close_price_index = 4
-        try:
-            for i, symbol in enumerate(self.pairs_data):
-                klines = self.client.get_historical_klines(symbol, self.interval, limit=limit)
-                if self.price_list[i]:
-                    self.price_list[i].pop()
-                for kline in klines:
-                    self.price_list[i].insert(0, float(kline[close_price_index]))
-        except exceptions.BinanceAPIException as e:
-            print(e.message)
+        for symbol in self._pairs_data:
+            klines = self._client.get_historical_klines(symbol, self._interval, limit=limit)
+            if self._pairs_data[symbol]['price_list']:
+                self._pairs_data[symbol]['price_list'].pop()
+            for kline in klines:
+                self._pairs_data[symbol]['price_list'].insert(0, float(kline[close_price_index]))
         pass
 
     def _get_symbol_orders(self, symbol) -> dict:
-        try:
-            orders = self.client.get_all_orders(symbol=symbol)
-            return orders
-        except exceptions.BinanceAPIException as e:
-            print(f"Error getting orders. {e.message}")
+        return self._client.get_all_orders(symbol=symbol)
 
     def _get_assets_balance(self) -> list:
-        try:
-            balances = self.client.get_account()['balances']
-            return balances
-        except exceptions.BinanceAPIException as e:
-            print(f"Error. {e.message}")
-        pass
+        return self._client.get_account()['balances']
 
     def _get_symbol_avg_price(self, symbol: str) -> float:
-        try:
-            symbol_avg_price = float(self.client.get_avg_price(symbol=symbol)['price'])
-            return round_step_size(symbol_avg_price, self.symbols_data[symbol]['tick_size'])
-        except exceptions.BinanceAPIException as e:
-            print(e.message)
+        symbol_avg_price = float(self._client.get_avg_price(symbol=symbol)['price'])
+        return round_step_size(symbol_avg_price, self._pairs_data[symbol]['tick_size'])
 
     def _get_symbol_order(self, symbol: str, orderId: str) -> dict:
-        try:
-            order = self.client.get_order(symbol=symbol, orderId=orderId)
-            return order
-        except exceptions.BinanceAPIException as e:
-            print(e.message)
+        return self._client.get_order(symbol=symbol, orderId=orderId)
 
     def _get_ticksize(self, symbol) -> float:
         price_filter_index = 0
-        try:
-            symbol_filters = self.client.get_symbol_info(symbol=symbol)['filters']
-            ticksize = float(symbol_filters[price_filter_index]['tickSize'])
-            return ticksize
-        except exceptions.BinanceAPIException as e:
-            print(e.message)
+        symbol_filters = self._client.get_symbol_info(symbol=symbol)['filters']
+        return float(symbol_filters[price_filter_index]['tickSize'])
+
+    def _get_symbol_info(self, symbol) -> dict:
+        return self._client.get_symbol_info(symbol=symbol)
 
     # GETTERS END
 
     # OTHER API CALLS START
     def _cancel_symbol_order(self, symbol: str, orderId: str) -> dict:
-        try:
-            result = self.client.cancel_order(symbol=symbol, orderId=orderId)
-            return result
-        except exceptions.BinanceAPIException as e:
-            print(e.message)
+        return self._client.cancel_order(symbol=symbol, orderId=orderId)
 
     # makes order at given price and returns result if successful or not
-    def _make_order(self, symbol: str, side: str, quantity: float, price: float = None) -> bool:
+    def _make_order(self, symbol: str, side: str, qty: float, price: float = None) -> bool:
         order_completed = False
-        if self.order_type == Client.ORDER_TYPE_LIMIT:
-            price = self._get_symbol_avg_price(symbol)
         try:
-            response = self.client.create_order(
+            response = self._client.create_order(
                 symbol=symbol,
                 side=side,
-                # TODO: decide maybe implement stop limit loss? this was ORDER_TYPE_LIMIT b4
-                type=self.order_type,
-                # TODO: make this parameter from func so it works with both types of orders?
-                timeInForce=self.time_in_force,
-                quantity=quantity,
+                type=self._pairs_config[symbol]['order_type'],
+                quantity=qty,
                 price=price,
-                newOrderRespType=ORDER_RESP_TYPE_RESULT
-                # TODO: make response part of config?
-                # newOrderRespType=ORDER_RESP_TYPE_ACK
+                timeInForce=self._pairs_config[symbol]['time_in_force'],
             )
             # TODO: make logging?
-            print(f"{response['side']} {response['type']} {response['symbol']} {response['status']=}")
-            # TODO: fix this block
-            if self.time_in_force == Client.TIME_IN_FORCE_FOK:
-                if response['status'] == Client.ORDER_STATUS_EXPIRED:
-                    return False
-            order_completed = True
-        except exceptions.BinanceAPIException as e:
-            print(f"Error executing order for {symbol}. Order type {side}. Price {price}. {e.message}")
+            print(f"{response['side']} {response['type']} {response['symbol']} {response['status']}")
+            if response['status'] == Client.ORDER_STATUS_FILLED:
+                order_completed = True
+        except exceptions.BinanceOrderException as e:
+            print(e.message)
         return order_completed
 
     # OTHER API CALLS END
 
     # MENU OPTIONS START
     def _save_pairs_data(self) -> None:
-        validate(instance=self.pairs_data, schema=pairs_schema)
-        with open("pairs.json", "w") as pairs_file:
-            json.dump(self.pairs_data, pairs_file, indent=2, separators=(',', ': '))
+        validate(instance=self._pairs_config, schema=pairs_schema)
+        with open(PAIRS_FILE_NAME, 'w') as pairs_file:
+            json.dump(self._pairs_config, pairs_file, indent=2, separators=(',', ': '))
         pass
 
     def _print_balances(self) -> None:
         balances = self._get_assets_balance()
-        for balance in balances:
-            print(balance)
+        if balances:
+            for balance in balances:
+                print(balance)
         pass
 
     def _print_positions(self) -> None:
-        for key, value in self.pairs_data.items():
+        for key, value in self._pairs_config.items():
             print(f"{key} position: {value['position']}")
         pass
 
     def _print_symbol_orders(self) -> None:
         symbol = input("Enter symbol: ")
+        last_n_items = 5
         orders = self._get_symbol_orders(symbol=symbol)
-        # TODO: if order are none this crashes
-        orders = orders[-5:]
-        for order in orders:
-            print(f"id:{order['orderId']} price:{order['price']} side:{order['side']} executed:{order['executedQty']}")
+        if orders:
+            orders = orders[-last_n_items:]
+            for order in orders:
+                print(f"id:{order['orderId']} price:{order['price']} "
+                      f"side:{order['side']} executed:{order['executedQty']}")
         pass
 
     def _print_symbol_order(self) -> None:
@@ -262,6 +239,11 @@ class Robot:
         result = self._cancel_symbol_order(symbol, orderId)
         print(result)
         pass
+
+    def _print_symbol_info(self):
+        symbol = input("Enter symbol: ")
+        symbol_info = self._get_symbol_info(symbol)
+        print(f"{symbol_info['filters'][0]}")
     # MENU OPTIONS END
 
 
@@ -288,12 +270,12 @@ pairs_schema = {
     "maxProperties": 5,
     "patternProperties": {
         "^[A-Z]+$": {
-      "required": [
-        "trade_quantity",
-        "position",
-        "order_type",
-        "time_in_force"
-      ],
+            "required": [
+                "trade_quantity",
+                "position",
+                "order_type",
+                "time_in_force"
+            ],
             "type": "object",
             "properties": {
                 "trade_quantity": {
@@ -304,53 +286,53 @@ pairs_schema = {
                         "BUY",
                         "SELL"
                     ]
-        },
-        "order_type": {
-          "enum": [
-            "MARKET",
-            "LIMIT"
-          ]
-        },
-        "time_in_force": {
-          "enum": [
-            "FOK",
-            "GTC",
-            "IOC",
-            None
-          ]
-        }
-      },
-      "if": {
-        "properties": {
-          "order_type": {
-            "enum": [
-              "LIMIT"
-            ]
-          }
-        }
-      },
-      "then": {
-        "properties": {
-          "time_in_force": {
-            "enum": [
-              "FOK",
-              "GTC",
-              "IOC"
-            ]
-          }
+                },
+                "order_type": {
+                    "enum": [
+                        "MARKET",
+                        "LIMIT"
+                    ]
+                },
+                "time_in_force": {
+                    "enum": [
+                        "FOK",
+                        "GTC",
+                        "IOC",
+                        None
+                    ]
                 }
             },
-      "else": {
-        "properties": {
-          "time_in_force": {
-            "enum": [
-              None
-            ]
+            "if": {
+                "properties": {
+                    "order_type": {
+                        "enum": [
+                            "LIMIT"
+                        ]
+                    }
+                }
+            },
+            "then": {
+                "properties": {
+                    "time_in_force": {
+                        "enum": [
+                            "FOK",
+                            "GTC",
+                            "IOC"
+                        ]
+                    }
+                }
+            },
+            "else": {
+                "properties": {
+                    "time_in_force": {
+                        "enum": [
+                            None
+                        ]
+                    }
+                }
+            },
+            "additionalProperties": False
         }
-        }
-      },
-      "additionalProperties": False
-    }
     },
     "additionalProperties": False
 }
