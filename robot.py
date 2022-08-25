@@ -267,8 +267,7 @@ class Robot:
 
 config_schema = {
     "type": "object",
-    "required": ["api_key", "api_secret", "timeout", "long_term", "short_term", "interval", "order_type",
-                 "time_in_force"],
+    "required": ["api_key", "api_secret", "timeout", "long_term", "short_term", "interval"],
     "properties": {
         "api_key": {"type": "string"},
         "api_secret": {"type": "string"},
@@ -278,11 +277,7 @@ config_schema = {
         "interval": {"enum": ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "8h", "12h", "1d", "3d", "1w", "1M"]},
         # how many data points to take from given interval
         "long_term": {"type": "integer", "minimum": 15},
-        "short_term": {"type": "integer", "minimum": 5},
-        # there are others like "STOP LOSS" and "TAKE_PROFIT_MARKET"
-        "order_type": {"enum": ["MARKET", "LIMIT"]},
-        # TODO: if order_type is MARKET, time_in_force should be None
-        "time_in_force": {"enum": ["GTC", "IOC", "FOK", None]}
+        "short_term": {"type": "integer", "minimum": 5}
     },
     "additionalProperties": False
 }
@@ -293,6 +288,12 @@ pairs_schema = {
     "maxProperties": 5,
     "patternProperties": {
         "^[A-Z]+$": {
+      "required": [
+        "trade_quantity",
+        "position",
+        "order_type",
+        "time_in_force"
+      ],
             "type": "object",
             "properties": {
                 "trade_quantity": {
@@ -303,13 +304,53 @@ pairs_schema = {
                         "BUY",
                         "SELL"
                     ]
+        },
+        "order_type": {
+          "enum": [
+            "MARKET",
+            "LIMIT"
+          ]
+        },
+        "time_in_force": {
+          "enum": [
+            "FOK",
+            "GTC",
+            "IOC",
+            None
+          ]
+        }
+      },
+      "if": {
+        "properties": {
+          "order_type": {
+            "enum": [
+              "LIMIT"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "time_in_force": {
+            "enum": [
+              "FOK",
+              "GTC",
+              "IOC"
+            ]
+          }
                 }
             },
-            "required": [
-                "position",
-                "trade_quantity"
+      "else": {
+        "properties": {
+          "time_in_force": {
+            "enum": [
+              None
             ]
         }
+        }
+      },
+      "additionalProperties": False
+    }
     },
     "additionalProperties": False
 }
