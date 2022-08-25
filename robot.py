@@ -26,47 +26,32 @@ def print_menu():
 
 class Robot:
     def __init__(self):
-        # TODO: Decide what to keep inside class and what not, long_sma needed or not?
-        # TODO: Fix this warning
-        self.client: Client = None
-        # Get config data
         # TODO: make file names some kind of constant
         with open("config.json", 'r') as config_file:
             data = json.load(config_file)
             validate(instance=data, schema=config_schema)
-            self._init_client(data['api_key'], data['api_secret'])
-            self.timeout = data['timeout']
+            self.client = Client(data['api_key'], data['api_secret'], testnet=True)
             self.long_term = data['long_term']
             self.short_term = data['short_term']
             if self.short_term >= self.long_term:
                 raise ValidationError(message="Short term should be lower than long term!")
+            self.timeout = data['timeout']
             self.interval = data['interval']
             self.order_type = data['order_type']
             self.time_in_force = data['time_in_force']
-        # Get pairs data
+
         with open('pairs.json', 'r') as pairs_file:
             data: dict = json.load(pairs_file)
             validate(instance=data, schema=pairs_schema)
-            self.pairs_data = data
+            self.pairs_config = data
 
-        self.number_of_pairs = len(self.pairs_data.keys())
-        # TODO: fix naming. symbols data ~ pairs data
-        self.symbols_data = dict.fromkeys(self.pairs_data.keys(), {})
-        if self.order_type == Client.ORDER_TYPE_LIMIT:
-            for key in self.symbols_data.keys():
-                self.symbols_data[key]['tick_size'] = self._get_ticksize(key)
-        for key in self.symbols_data.keys():
-            self.symbols_data[key]['long_sma'] = None
-            self.symbols_data[key]['short_sma'] = None
-        self.price_list = [[] for _ in range(self.number_of_pairs)]
-
-    def _init_client(self, api_key: str, api_secret: str) -> None:
-        self.client = Client(api_key, api_secret, testnet=True)
-        try:
-            self.client.ping()
-        except exceptions.BinanceAPIException as e:
-            print(f"Error connecting to client. Error code :{e.status_code}. Message: {e.message} Code: {e.code}")
-        pass
+        self.pairs_data = {key: {} for key in self.pairs_config}
+        for key in self.pairs_data.keys():
+            # poh ir tiesiog visada pasiimt is serverio afdru reikes stop limit daryt?
+            self.pairs_data[key]['tick_size'] = self._get_ticksize(key)
+            self.pairs_data[key]['long_sma'] = None
+            self.pairs_data[key]['short_sma'] = None
+            self.pairs_data[key]['price_list'] = []
 
     def run(self) -> None:
         self._get_historic_prices(limit=self.long_term)
