@@ -4,5 +4,5 @@
     "timeout": 60,
   "long_term": 15,
   "short_term": 5,
-  "interval": "Client.KLINE_INTERVAL_15MINUTE"
+  "interval": "15m"
 }
