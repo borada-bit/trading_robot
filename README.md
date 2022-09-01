@@ -9,7 +9,7 @@ Trading bot to trade using python-binance API on Binance testnet.
 
 # config.json
 
-This file is used to config robot. First are api key and secret to connnect to binance testnet. Timeout means how much time to wait between trying to trade pairs provided in seconds. 60 - means try to trade every 60 seconds. Interval is used to determine what interval is used to retrieve klines/candlestick data. Long term and short term properties are used to determine what period to use for calculating moving averages, they are compared when trading.
+This file is used to config robot. First are api key and secret to connnect to binance testnet. Timeout means how much seconds to wait between trying to trade pairs. Interval is used to retrieve klines/candlestick data. Long term and short term properties are used to determine what period to use for calculating moving averages.
 
 ### Example JSON config file
 
@@ -25,7 +25,7 @@ This file is used to config robot. First are api key and secret to connnect to b
 ```
 # pairs.json
 
-This file holds symbols data that robot needs to trade. There can be limit or market type orders. If limit type is chosen, one must provide time_in_force parameter (FOK - fill or kill, GTC - good till canceled, IOC - immediate or cancel). Trade quantity describes how much base asset to trade with each trade.
+This file holds symbols data for trading. There can be `limit` or `market` type orders. If limit type is chosen, `time_in_force` must be provided (FOK - fill or kill, GTC - good till canceled, IOC - immediate or cancel). Trade quantity describes how much base asset is traded each trade.
 
 ### Example JSON pairs file
 
