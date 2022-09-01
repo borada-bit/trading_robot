@@ -1,0 +1,32 @@
+{
+  "BTCBUSD": {
+    "trade_quantity": 0.01,
+    "position": "BUY",
+    "order_type": "LIMIT",
+    "time_in_force": "FOK"
+  },
+  "LTCBUSD": {
+    "trade_quantity": 1,
+    "position": "BUY",
+    "order_type": "MARKET",
+    "time_in_force": null
+  },
+  "XRPBUSD": {
+    "trade_quantity": 100,
+    "position": "BUY",
+    "order_type": "MARKET",
+    "time_in_force": null
+  },
+  "BNBBTC": {
+    "trade_quantity": 0.1,
+    "position": "BUY",
+    "order_type": "LIMIT",
+    "time_in_force": "FOK"
+  },
+  "ETHBTC": {
+    "trade_quantity": 0.1,
+    "position": "SELL",
+    "order_type": "LIMIT",
+    "time_in_force": "FOK"
+  }
+}
