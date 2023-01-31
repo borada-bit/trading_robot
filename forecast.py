@@ -20,19 +20,17 @@ def model_predict_arima(symbol: str, klines):
     dir_prefix = f'./results/{symbol}/'
     print(f'Starting forecasting for {symbol}')
 
-    df = binance_klines_to_df(klines)
-    df = df[['Open Time', 'Close']]
+    df = klines
     df.set_index('Open Time', inplace=True)
     df = list(df['Close'])
 
     order = best_params_arima(df)
-    print(f'Best order: {order=}')
+    # print(f'Best order: {order=}')
 
     model = ARIMA(df, order=order)
     model_fit = model.fit()
     output = model_fit.forecast(steps=1)
     yhat = output[0]
-    print(f'Predicted price for {symbol} {yhat}')
     return yhat
 
 def best_params_arima(df):

@@ -1,7 +1,7 @@
 {
     "api_key": "?",
     "api_secret": "?",
-    "timeout": 60,
+  "timeout": 900,
   "long_term": 15,
   "short_term": 5,
   "interval": "15m"

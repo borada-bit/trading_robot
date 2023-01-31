@@ -59,9 +59,13 @@ class Robot:
             self._pairs_data[symbol]['long_sma'] = None
             self._pairs_data[symbol]['short_sma'] = None
             self._pairs_data[symbol]['price_list'] = []
+            self._pairs_data[symbol]['df'] = pd.DataFrame
+            self._pairs_data[symbol]['arima_forecast'] = 0 
 
     def run(self) -> None:
         self._get_historic_prices(limit=self._long_term)
+        self._get_klines_as_df(limit=1000)
+        self._calculate_arima()
         self._calculate_sma()
         print_menu()
         quit_loop = False
@@ -96,7 +100,13 @@ class Robot:
         for symbol in self._pairs_data:
             self._pairs_data[symbol]['long_sma'] = mean(self._pairs_data[symbol]['price_list'])
             self._pairs_data[symbol]['short_sma'] = mean(self._pairs_data[symbol]['price_list'][0:self._short_term])
+            print(f"{symbol} | LSMA: {self._pairs_data[symbol]['long_sma']} | SSMA {self._pairs_data[symbol]['short_sma']}")
         pass
+
+    def _calculate_arima(self) -> None:
+        for symbol in self._pairs_data:
+            self._pairs_data[symbol]['arima_forecast'] = model_predict_arima(symbol, self._pairs_data[symbol]['df'])
+            print(self._pairs_data[symbol]['arima_forecast'])
 
     def _get_choice(self) -> int:
         try:
@@ -114,30 +124,50 @@ class Robot:
     def _try_trade(self) -> None:
         klines = 1
         self._get_historic_prices(klines)
+        self._get_klines_as_df(klines)
+        self._calculate_arima()
         self._calculate_sma()
         self._check_opportunity()
         pass
 
+    # strategy
     def _check_opportunity(self) -> None:
-        for key, value in self._pairs_config.items():
-            position = value['position']
-            long_sma = self._pairs_data[key]['long_sma']
-            short_sma = self._pairs_data[key]['short_sma']
+        # add configuration what to trade with (sma lma, ARIMA, random?)
+        for symbol, config in self._pairs_config.items():
+            position = config['position']
+            long_sma = self._pairs_data[symbol]['long_sma']
+            short_sma = self._pairs_data[symbol]['short_sma']
             price = None
-            if value['order_type'] == Client.ORDER_TYPE_LIMIT:
-                price = self._get_symbol_avg_price(key)
+            if config['order_type'] == Client.ORDER_TYPE_LIMIT:
+                price = self._get_symbol_avg_price(symbol)
+                if self._pairs_data[symbol]['arima_forecast'] > price and position == 'BUY':
+                    if self._make_order(symbol, position, config['trade_quantity'], price):
+                        config['position'] = 'SELL'
+                elif self._pairs_data[symbol]['arima_forecast'] < price and position == 'BUY':
+                    if self._make_order(symbol, position, config['trade_quantity'], price):
+                        config['position'] = 'BUY' 
+    
             if short_sma > long_sma and position == 'BUY':
-                if self._make_order(key, position, value['trade_quantity'], price):
-                    value['position'] = 'SELL'
+                if self._make_order(symbol, position, config['trade_quantity'], price):
+                    config['position'] = 'SELL'
             elif short_sma < long_sma and position == 'SELL':
-                if self._make_order(key, position, value['trade_quantity'], price):
-                    value['position'] = 'BUY'
+                if self._make_order(symbol, position, config['trade_quantity'], price):
+                    config['position'] = 'BUY' 
         pass
 
     # HELPER FUNC END
 
     # GETTERS START
     def _get_historic_prices(self, limit: int) -> None:
+        """
+        Retrieve and store the historical close prices of each symbol from the client.
+
+        Args:
+        limit: An integer representing the number of historical price data points to retrieve.
+
+        Returns:
+        None
+        """
         close_price_index = 4
         for symbol in self._pairs_data:
             klines = self._client.get_historical_klines(symbol, self._interval, limit=limit)
@@ -145,7 +175,27 @@ class Robot:
                 self._pairs_data[symbol]['price_list'].pop()
             for kline in klines:
                 self._pairs_data[symbol]['price_list'].insert(0, float(kline[close_price_index]))
+            print(f"{symbol} recent prices {self._pairs_data[symbol]['price_list'][:7]}")
         pass
+
+    def _get_klines_as_df(self, limit: int) -> None:
+        for symbol in self._pairs_data:
+            klines = self._client.get_historical_klines(symbol, self._interval, limit=limit)
+            klines = np.array(klines)
+            df = pd.DataFrame(klines.reshape(-1, 12), dtype=float, columns=('Open Time', 'Open', 'High', 'Low', 'Close', 'Volume', 'Close time', 'Quote asset vol', 'Num trades', 'Taker base vol', 'Taker quote vol', 'Ignore'))
+            df['Open Time'] = pd.to_datetime(df['Open Time'], unit='ms')
+            df = df[['Open Time', 'Close']]
+            if self._pairs_data[symbol]['df'].empty:
+                self._pairs_data[symbol]['df'] = df
+            else:
+                self._pairs_data[symbol]['df'] = self._pairs_data[symbol]['df'][:-1]
+                self._pairs_data[symbol]['df'] = df.append(self._pairs_data[symbol]['df'], ignore_index=True)
+        pass
+
+
+    def _get_historical_klines(self, symbol: str, date: str):
+        klines = self._client.get_historical_klines(symbol, Client.KLINE_INTERVAL_15MINUTE, end_str='23 Jan, 2023')
+        return klines
 
     def _get_symbol_orders(self, symbol) -> dict:
         return self._client.get_all_orders(symbol=symbol)
