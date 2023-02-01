@@ -9,6 +9,11 @@ from inputimeout import inputimeout, TimeoutOccurred
 from binance import Client, exceptions
 from binance.helpers import round_step_size
 
+from forecast import model_predict_arima
+import numpy as np
+import pandas as pd
+from datetime import datetime
+
 
 def print_menu():
     print("""
@@ -26,10 +31,15 @@ def print_menu():
 
 CONFIG_FILE_NAME = 'config.json'
 PAIRS_FILE_NAME = 'pairs.json'
+RESULTS_DIR_PREFIX = 'results'
+LOGGING_FILE_NAME = 'trades.log'
 
 MENU_START_INDEX = 0
 MENU_END_INDEX = 9
 MENU_TRADE_INDEX = -1
+
+KLINES_COLUMNS = ['Open Time', 'Open', 'High', 'Low', 'Close', 'Volume', 'Close Time',
+                  'Quote Asset Volume', 'Number of Trades', 'Taker Base Volume', 'Taker Quote Volume', 'Ignore']
 
 
 class Robot:
@@ -60,7 +70,9 @@ class Robot:
             self._pairs_data[symbol]['short_sma'] = None
             self._pairs_data[symbol]['price_list'] = []
             self._pairs_data[symbol]['df'] = pd.DataFrame
-            self._pairs_data[symbol]['arima_forecast'] = 0 
+            self._pairs_data[symbol]['arima_forecast'] = 0
+            log_file = open(f"{RESULTS_DIR_PREFIX}/{symbol}/{LOGGING_FILE_NAME}", "w")
+            log_file.write("timestamp, order_type, quantity, price\n")
 
     def run(self) -> None:
         self._get_historic_prices(limit=self._long_term)
@@ -145,15 +157,22 @@ class Robot:
                         config['position'] = 'SELL'
                 elif self._pairs_data[symbol]['arima_forecast'] < price and position == 'BUY':
                     if self._make_order(symbol, position, config['trade_quantity'], price):
-                        config['position'] = 'BUY' 
-    
+                        config['position'] = 'BUY'
+
             if short_sma > long_sma and position == 'BUY':
                 if self._make_order(symbol, position, config['trade_quantity'], price):
                     config['position'] = 'SELL'
             elif short_sma < long_sma and position == 'SELL':
                 if self._make_order(symbol, position, config['trade_quantity'], price):
-                    config['position'] = 'BUY' 
-        pass
+                    config['position'] = 'BUY'
+
+    pass
+
+    # Log trade details
+    def _log_trade(self, symbol: str, order_type: str, quantity: float, price: float):
+        log_file = open(f"{RESULTS_DIR_PREFIX}/{symbol}/{LOGGING_FILE_NAME}", "a")
+        log_file.write(f"{datetime.now()}, {order_type}, {quantity}, {price}\n")
+        log_file.close()
 
     # HELPER FUNC END
 
@@ -175,27 +194,28 @@ class Robot:
                 self._pairs_data[symbol]['price_list'].pop()
             for kline in klines:
                 self._pairs_data[symbol]['price_list'].insert(0, float(kline[close_price_index]))
-            print(f"{symbol} recent prices {self._pairs_data[symbol]['price_list'][:7]}")
+            print(f"{symbol} recent prices {self._pairs_data[symbol]['price_list'][:4]} past prices {self._pairs_data[symbol]['price_list'][-4:]}")
         pass
 
     def _get_klines_as_df(self, limit: int) -> None:
         for symbol in self._pairs_data:
             klines = self._client.get_historical_klines(symbol, self._interval, limit=limit)
             klines = np.array(klines)
-            df = pd.DataFrame(klines.reshape(-1, 12), dtype=float, columns=('Open Time', 'Open', 'High', 'Low', 'Close', 'Volume', 'Close time', 'Quote asset vol', 'Num trades', 'Taker base vol', 'Taker quote vol', 'Ignore'))
+            df = pd.DataFrame(klines.reshape(-1, 12), dtype=float, columns=KLINES_COLUMNS)
             df['Open Time'] = pd.to_datetime(df['Open Time'], unit='ms')
+            # TAIL - recent prices, HEAD - old prices
             df = df[['Open Time', 'Close']]
             if self._pairs_data[symbol]['df'].empty:
                 self._pairs_data[symbol]['df'] = df
             else:
-                self._pairs_data[symbol]['df'] = self._pairs_data[symbol]['df'][:-1]
-                self._pairs_data[symbol]['df'] = df.append(self._pairs_data[symbol]['df'], ignore_index=True)
+                # remove first element - oldest price
+                self._pairs_data[symbol]['df'] = self._pairs_data[symbol]['df'].iloc[1:]
+                # print(f"before append {self._pairs_data[symbol]['df']}")
+                # append neweset price to the end
+                self._pairs_data[symbol]['df'] = pd.concat([self._pairs_data[symbol]['df'], df], ignore_index=True)# self._pairs_data[symbol]['df'].append(df, ignore_index=True)
+                # print(f"after append {self._pairs_data[symbol]['df']}")
+            # print(f"{symbol} recent prices {self._pairs_data[symbol]['df'].tail(4)['Close'].values} past prices {self._pairs_data[symbol]['df'].head(4)['Close'].values}")
         pass
-
-
-    def _get_historical_klines(self, symbol: str, date: str):
-        klines = self._client.get_historical_klines(symbol, Client.KLINE_INTERVAL_15MINUTE, end_str='23 Jan, 2023')
-        return klines
 
     def _get_symbol_orders(self, symbol) -> dict:
         return self._client.get_all_orders(symbol=symbol)
@@ -240,6 +260,7 @@ class Robot:
             print(f"{response['side']} {response['type']} {response['symbol']} {response['status']}")
             if response['status'] == Client.ORDER_STATUS_FILLED:
                 order_completed = True
+                self._log_trade(symbol, side, qty, price)
         except exceptions.BinanceOrderException as e:
             print(e.message)
         return order_completed
