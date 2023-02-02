@@ -155,7 +155,7 @@ class Robot:
                 if self._pairs_data[symbol]['arima_forecast'] > price and position == 'BUY':
                     if self._make_order(symbol, position, config['trade_quantity'], price):
                         config['position'] = 'SELL'
-                elif self._pairs_data[symbol]['arima_forecast'] < price and position == 'BUY':
+                elif self._pairs_data[symbol]['arima_forecast'] < price and position == 'SELL':
                     if self._make_order(symbol, position, config['trade_quantity'], price):
                         config['position'] = 'BUY'
 
