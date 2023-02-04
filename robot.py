@@ -11,6 +11,7 @@ from binance import Client, exceptions
 from binance.helpers import round_step_size
 
 from forecast import model_predict_arima
+from util import graph_orders
 import numpy as np
 import pandas as pd
 
@@ -22,6 +23,7 @@ def print_menu():
     4. Print order.
     5. Cancel order manually.
     6. Print symbol price filter.
+    7. Graph symbol orders.
     ----------------------------------
     9. Print menu.
     0. Quit.""")
@@ -94,6 +96,8 @@ class Robot:
                 self._cancel_order()
             elif choice == 6:
                 self._print_symbol_info()
+            elif choice == 7:
+                self._graph_symbol_orders()
             elif choice == 9:
                 print_menu()
             elif choice == MENU_TRADE_INDEX:
@@ -333,6 +337,28 @@ class Robot:
         symbol = input("Enter symbol: ")
         symbol_info = self._get_symbol_info(symbol)
         print(f"{symbol_info['filters'][0]}")
+
+    def _graph_symbol_orders(self) -> None:
+        symbol = input("Enter symbol: ")
+
+        orders = self._get_symbol_orders(symbol=symbol)
+        orders_filtered = [
+            {'time': order['time'], 'price': float(order['price']),
+             'side': order['side'], 'executed': float(order['executedQty'])} for order in orders 
+            if order['time'] > 1675463697770]
+        orders_df = pd.DataFrame(orders_filtered, columns=['time', 'id', 'price', 'side', 'executed'])
+
+        start_str = str(orders_df['time'].iloc[0])
+        end_str = str(orders_df['time'].iloc[-1])
+
+        klines = self._client.get_historical_klines(symbol, self._interval, start_str=start_str, end_str=end_str)
+        klines = np.array(klines)
+        prices_df = pd.DataFrame(klines.reshape(-1, 12), dtype=float, columns=KLINES_COLUMNS)
+        prices_df['Open Time'] = pd.to_datetime(prices_df['Open Time'], unit='ms')
+        prices_df = prices_df[['Open Time', 'Close']]
+        
+        graph_orders(symbol, orders_df, prices_df)
+
     # MENU OPTIONS END
 
 
