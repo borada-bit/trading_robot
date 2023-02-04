@@ -1,9 +1,9 @@
 {
   "BTCBUSD": {
     "trade_quantity": 0.01,
-    "position": "BUY",
-    "order_type": "LIMIT",
-    "time_in_force": "FOK"
+    "position": "SELL",
+    "order_type": "MARKET",
+    "time_in_force": null
   },
   "LTCBUSD": {
     "trade_quantity": 1,
@@ -20,13 +20,13 @@
   "BNBBTC": {
     "trade_quantity": 0.1,
     "position": "BUY",
-    "order_type": "LIMIT",
-    "time_in_force": "FOK"
+    "order_type": "MARKET",
+    "time_in_force": null
   },
   "ETHBTC": {
     "trade_quantity": 0.1,
     "position": "SELL",
-    "order_type": "LIMIT",
-    "time_in_force": "FOK"
+    "order_type": "MARKET",
+    "time_in_force": null
   }
 }

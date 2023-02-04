@@ -18,4 +18,4 @@ def graph_orders(symbol, orders_df, prices_df) -> None:
             color = 'blue' if order.side == 'BUY' else 'green'
         plt.scatter(mdates.datestr2num(timestamp_to_readable(order.time)), order.price, marker='o', alpha=0.8, color=color, label='Trade')
 
-    plt.savefig(f"{timestamp_to_readable(orders_df['time'].iloc[0])}_{symbol}_graph.png", bbox_inches='tight')
+    plt.savefig(f"{timestamp_to_readable(orders_df['time'].iloc[0])}_{symbol}_graph.png")

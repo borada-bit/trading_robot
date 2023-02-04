@@ -14,6 +14,7 @@ from forecast import model_predict_arima
 from util import graph_orders
 import numpy as np
 import pandas as pd
+import time
 
 
 def print_menu():
@@ -37,8 +38,14 @@ PAIRS_FILE_NAME = 'pairs.json'
 MIN_MENU_TIMEOUT = 60
 MAX_MENU_TIMEOUT = 3600
 
+ORDER_RETRY_WAIT_TIME = 15
+ORDER_MAX_RETRIES = 4
+
 MIN_LONG_TERM_SMA = 15
 MIN_SHORT_TERM_SMA = 5
+
+RESULTS_DIR_PREFIX = 'results'
+LOGGING_FILE_NAME = 'trades.log'
 
 MENU_START_INDEX = 0
 MENU_END_INDEX = 9
@@ -71,6 +78,7 @@ class Robot:
             self._timeout = data['timeout']
             self._interval = data['interval']
 
+
         with open(PAIRS_FILE_NAME, 'r') as pairs_file:
             data = json.load(pairs_file)
             validate(instance=data, schema=pairs_schema)
@@ -86,6 +94,8 @@ class Robot:
             elif self._strategy == TENDENCY_STRATEGY:
                 self._pairs_data[symbol]['df'] = pd.DataFrame
                 self._pairs_data[symbol]['arima_forecast'] = 0
+            log_file = open(f"{RESULTS_DIR_PREFIX}/{symbol}/{self._strategy}_{LOGGING_FILE_NAME}", "w")
+            log_file.write("timestamp,order_type,quantity,price\n")
 
     def run(self) -> None:
         if self._strategy == MEAN_STRATEGY:
@@ -190,6 +200,11 @@ class Robot:
                         config['position'] = 'BUY'
         pass
 
+    def _log_trade(self, symbol: str, response: dict) -> None:
+        log_file = open(f"{RESULTS_DIR_PREFIX}/{symbol}/{self._strategy}_{LOGGING_FILE_NAME}", "a")
+        log_file.write(f"{response['transactTime']},{response['side']},{response['executedQty']},{response['price']}\n")
+        log_file.close()
+
     # HELPER FUNC END
 
     # GETTERS START
@@ -274,25 +289,30 @@ class Robot:
     def _cancel_symbol_order(self, symbol: str, orderId: str) -> dict:
         return self._client.cancel_order(symbol=symbol, orderId=orderId)
 
-    # makes order at given price and returns result if successful or not
+    # Makes order at given price and returns result if successful or not
     def _make_order(self, symbol: str, side: str, qty: float, price: float = None) -> bool:
+        # Retry is useful if order type is MARKET
+        retries = 0
         order_completed = False
-        try:
-            response = self._client.create_order(
-                symbol=symbol,
-                side=side,
-                type=self._pairs_config[symbol]['order_type'],
-                quantity=qty,
-                price=price,
-                timeInForce=self._pairs_config[symbol]['time_in_force'],
-            )
-            # TODO: make logging?
-            print(f"{response['side']} {response['type']} {response['symbol']} {response['status']}")
-            # should probably do retry
-            if response['status'] == Client.ORDER_STATUS_FILLED:
-                order_completed = True
-        except exceptions.BinanceOrderException as e:
-            print(e.message)
+        while not order_completed and retries < ORDER_MAX_RETRIES:
+            try:
+                response = self._client.create_order(
+                    symbol=symbol,
+                    side=side,
+                    type=self._pairs_config[symbol]['order_type'],
+                    quantity=qty,
+                    price=price,
+                    timeInForce=self._pairs_config[symbol]['time_in_force'],
+                )
+                print(f"{response['side']} {response['type']} {response['symbol']} {response['status']}")
+                if response['status'] == Client.ORDER_STATUS_FILLED:
+                    order_completed = True
+                    self._log_trade(symbol, response)
+                    break
+            except exceptions.BinanceOrderException as e:
+                print(e.message)
+            retries += 1
+            time.sleep(ORDER_RETRY_WAIT_TIME)
         return order_completed
 
     # OTHER API CALLS END
