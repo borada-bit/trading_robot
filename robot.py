@@ -13,8 +13,6 @@ from binance.helpers import round_step_size
 from forecast import model_predict_arima
 import numpy as np
 import pandas as pd
-from datetime import datetime
-
 
 def print_menu():
     print("""
@@ -32,8 +30,6 @@ def print_menu():
 
 CONFIG_FILE_NAME = 'config.json'
 PAIRS_FILE_NAME = 'pairs.json'
-RESULTS_DIR_PREFIX = 'results'
-LOGGING_FILE_NAME = 'trades.log'
 
 MENU_START_INDEX = 0
 MENU_END_INDEX = 9
@@ -72,8 +68,6 @@ class Robot:
             self._pairs_data[symbol]['price_list'] = []
             self._pairs_data[symbol]['df'] = pd.DataFrame
             self._pairs_data[symbol]['arima_forecast'] = 0
-            log_file = open(f"{RESULTS_DIR_PREFIX}/{symbol}/{LOGGING_FILE_NAME}", "w")
-            log_file.write("timestamp, order_type, quantity, price\n")
 
     def run(self) -> None:
         self._get_historic_prices(limit=self._long_term)
@@ -113,7 +107,6 @@ class Robot:
         for symbol in self._pairs_data:
             self._pairs_data[symbol]['long_sma'] = mean(self._pairs_data[symbol]['price_list'])
             self._pairs_data[symbol]['short_sma'] = mean(self._pairs_data[symbol]['price_list'][0:self._short_term])
-            print(f"{symbol} | LSMA: {self._pairs_data[symbol]['long_sma']} | SSMA {self._pairs_data[symbol]['short_sma']}")
         pass
 
     def _calculate_arima(self) -> None:
@@ -169,11 +162,6 @@ class Robot:
 
     pass
 
-    # Log trade details
-    def _log_trade(self, symbol: str, order_type: str, quantity: float, price: float) -> None:
-        log_file = open(f"{RESULTS_DIR_PREFIX}/{symbol}/{LOGGING_FILE_NAME}", "a")
-        log_file.write(f"{datetime.now()}, {order_type}, {quantity}, {price}\n")
-        log_file.close()
 
     # HELPER FUNC END
 
@@ -195,7 +183,6 @@ class Robot:
                 self._pairs_data[symbol]['price_list'].pop()
             for kline in klines:
                 self._pairs_data[symbol]['price_list'].insert(0, float(kline[close_price_index]))
-            print(f"{symbol} recent prices {self._pairs_data[symbol]['price_list'][:4]} past prices {self._pairs_data[symbol]['price_list'][-4:]}")
         pass
 
     def _get_klines_as_df(self, limit: int) -> None:
@@ -211,12 +198,9 @@ class Robot:
             else:
                 # remove first element - oldest price
                 self._pairs_data[symbol]['df'] = self._pairs_data[symbol]['df'].iloc[1:]
-                # print(f"before append {self._pairs_data[symbol]['df']}")
                 # append neweset price to the end
                 self._pairs_data[symbol]['df'] = pd.concat([self._pairs_data[symbol]['df'], df],
                                                            ignore_index=True)
-                # print(f"after append {self._pairs_data[symbol]['df']}")
-            # print(f"{symbol} recent prices {self._pairs_data[symbol]['df'].tail(4)['Close'].values} past prices {self._pairs_data[symbol]['df'].head(4)['Close'].values}")
         pass
 
     def _get_symbol_orders(self, symbol) -> dict:
@@ -345,7 +329,7 @@ class Robot:
         print(result)
         pass
 
-    def _print_symbol_info(self):
+    def _print_symbol_info(self) -> None:
         symbol = input("Enter symbol: ")
         symbol_info = self._get_symbol_info(symbol)
         print(f"{symbol_info['filters'][0]}")
