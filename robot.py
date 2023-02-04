@@ -15,6 +15,7 @@ from util import graph_orders
 import numpy as np
 import pandas as pd
 
+
 def print_menu():
     print("""
     1. Print balances.
@@ -33,12 +34,23 @@ def print_menu():
 CONFIG_FILE_NAME = 'config.json'
 PAIRS_FILE_NAME = 'pairs.json'
 
+MIN_MENU_TIMEOUT = 60
+MAX_MENU_TIMEOUT = 3600
+
+MIN_LONG_TERM_SMA = 15
+MIN_SHORT_TERM_SMA = 5
+
 MENU_START_INDEX = 0
 MENU_END_INDEX = 9
 MENU_TRADE_INDEX = -1
 
 KLINES_COLUMNS = ['Open Time', 'Open', 'High', 'Low', 'Close', 'Volume', 'Close Time',
                   'Quote Asset Volume', 'Number of Trades', 'Taker Base Volume', 'Taker Quote Volume', 'Ignore']
+
+# Follow the trend and forecast next prices using ARIMA
+TENDENCY_STRATEGY = 'TENDENCY_ARIMA'
+# Expecting that price will return to the mean using long SMA and short SMA
+MEAN_STRATEGY = 'MEAN_SMA'
 
 
 class Robot:
@@ -50,10 +62,12 @@ class Robot:
             data = json.load(config_file)
             validate(instance=data, schema=config_schema)
             self._client = Client(data['api_key'], data['api_secret'], testnet=True)
-            self._long_term = data['long_term']
-            self._short_term = data['short_term']
-            if self._short_term >= self._long_term:
-                raise ValidationError(message="Short term should be lower than long term!")
+            self._strategy = data['strategy']
+            if self._strategy == MEAN_STRATEGY:
+                self._long_term = data['long_term']
+                self._short_term = data['short_term']
+                if self._short_term >= self._long_term:
+                    raise ValidationError(message="Short term should be lower than long term!")
             self._timeout = data['timeout']
             self._interval = data['interval']
 
@@ -65,17 +79,22 @@ class Robot:
         self._pairs_data = {key: {} for key in self._pairs_config}
         for symbol in self._pairs_data.keys():
             self._pairs_data[symbol]['tick_size'] = self._get_ticksize(symbol)
-            self._pairs_data[symbol]['long_sma'] = None
-            self._pairs_data[symbol]['short_sma'] = None
-            self._pairs_data[symbol]['price_list'] = []
-            self._pairs_data[symbol]['df'] = pd.DataFrame
-            self._pairs_data[symbol]['arima_forecast'] = 0
+            if self._strategy == MEAN_STRATEGY:
+                self._pairs_data[symbol]['long_sma'] = None
+                self._pairs_data[symbol]['short_sma'] = None
+                self._pairs_data[symbol]['price_list'] = []
+            elif self._strategy == TENDENCY_STRATEGY:
+                self._pairs_data[symbol]['df'] = pd.DataFrame
+                self._pairs_data[symbol]['arima_forecast'] = 0
 
     def run(self) -> None:
-        self._get_historic_prices(limit=self._long_term)
-        self._get_klines_as_df(limit=1000)
-        self._calculate_arima()
-        self._calculate_sma()
+        if self._strategy == MEAN_STRATEGY:
+            self._get_historic_prices(limit=self._long_term)
+            self._calculate_sma()
+        elif self._strategy == TENDENCY_STRATEGY:
+            self._get_klines_as_df(limit=1000)
+            self._calculate_arima()
+
         print_menu()
         quit_loop = False
         while not quit_loop:
@@ -133,16 +152,17 @@ class Robot:
 
     def _try_trade(self) -> None:
         klines = 1
-        self._get_historic_prices(klines)
-        self._get_klines_as_df(klines)
-        self._calculate_arima()
-        self._calculate_sma()
-        self._check_opportunity()
+        if self._strategy == MEAN_STRATEGY:
+            self._get_historic_prices(klines)
+            self._calculate_sma()
+            self._trade_sma()
+        elif self._strategy == TENDENCY_STRATEGY:
+            self._get_klines_as_df(klines)
+            self._calculate_arima()
+            self._trade_arima()
         pass
 
-    # strategy
-    def _check_opportunity(self) -> None:
-        # add configuration what to trade with (sma lma, ARIMA, random?)
+    def _trade_sma(self) -> None:
         for symbol, config in self._pairs_config.items():
             position = config['position']
             long_sma = self._pairs_data[symbol]['long_sma']
@@ -150,22 +170,25 @@ class Robot:
             price = None
             if config['order_type'] == Client.ORDER_TYPE_LIMIT:
                 price = self._get_symbol_avg_price(symbol)
-                if self._pairs_data[symbol]['arima_forecast'] > price and position == 'BUY':
-                    if self._make_order(symbol, position, config['trade_quantity'], price):
-                        config['position'] = 'SELL'
-                elif self._pairs_data[symbol]['arima_forecast'] < price and position == 'SELL':
-                    if self._make_order(symbol, position, config['trade_quantity'], price):
-                        config['position'] = 'BUY'
-
             if short_sma > long_sma and position == 'BUY':
                 if self._make_order(symbol, position, config['trade_quantity'], price):
                     config['position'] = 'SELL'
             elif short_sma < long_sma and position == 'SELL':
                 if self._make_order(symbol, position, config['trade_quantity'], price):
                     config['position'] = 'BUY'
+        pass
 
-    pass
-
+    def _trade_arima(self) -> None:
+        for symbol, config in self._pairs_config.items():
+            position = config['position']
+            price = self._get_symbol_avg_price(symbol)
+            if self._pairs_data[symbol]['arima_forecast'] > price and position == 'BUY':
+                if self._make_order(symbol, position, config['trade_quantity'], price):
+                    config['position'] = 'SELL'
+                elif self._pairs_data[symbol]['arima_forecast'] < price and position == 'SELL':
+                    if self._make_order(symbol, position, config['trade_quantity'], price):
+                        config['position'] = 'BUY'
+        pass
 
     # HELPER FUNC END
 
@@ -265,9 +288,9 @@ class Robot:
             )
             # TODO: make logging?
             print(f"{response['side']} {response['type']} {response['symbol']} {response['status']}")
+            # should probably do retry
             if response['status'] == Client.ORDER_STATUS_FILLED:
                 order_completed = True
-                self._log_trade(symbol, side, qty, price)
         except exceptions.BinanceOrderException as e:
             print(e.message)
         return order_completed
@@ -344,7 +367,7 @@ class Robot:
         orders = self._get_symbol_orders(symbol=symbol)
         orders_filtered = [
             {'time': order['time'], 'price': float(order['price']),
-             'side': order['side'], 'executed': float(order['executedQty'])} for order in orders 
+             'side': order['side'], 'executed': float(order['executedQty'])} for order in orders
             if order['time'] > 1675463697770]
         orders_df = pd.DataFrame(orders_filtered, columns=['time', 'id', 'price', 'side', 'executed'])
 
@@ -356,7 +379,7 @@ class Robot:
         prices_df = pd.DataFrame(klines.reshape(-1, 12), dtype=float, columns=KLINES_COLUMNS)
         prices_df['Open Time'] = pd.to_datetime(prices_df['Open Time'], unit='ms')
         prices_df = prices_df[['Open Time', 'Close']]
-        
+
         graph_orders(symbol, orders_df, prices_df)
 
     # MENU OPTIONS END
@@ -364,25 +387,52 @@ class Robot:
 
 config_schema = {
     "type": "object",
-    "required": ["api_key", "api_secret", "timeout", "long_term", "short_term", "interval"],
+    "required": ["api_key", "api_secret", "timeout", "interval", "strategy"],
     "properties": {
         "api_key": {"type": "string"},
         "api_secret": {"type": "string"},
-        # how often to check for trades
-        "timeout": {"type": "integer", "minimum": 60, "maximum": 3600},
-        # from python-binance source code, these are enums used for kline intervals
+        "timeout": {"type": "integer", "minimum": MIN_MENU_TIMEOUT, "maximum": MAX_MENU_TIMEOUT},
         "interval": {"enum": ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "8h", "12h", "1d", "3d", "1w", "1M"]},
-        # how many data points to take from given interval
-        "long_term": {"type": "integer", "minimum": 15},
-        "short_term": {"type": "integer", "minimum": 5}
+        "strategy": {
+            "type": "string",
+            "enum": [TENDENCY_STRATEGY, MEAN_STRATEGY]
+        },
+        "long_term": {
+            "type": "integer",
+            "minimum": MIN_LONG_TERM_SMA,
+            "if": {
+                "properties": {
+                    "strategy": {
+                        "enum": [MEAN_STRATEGY]
+                    }
+                }
+            },
+            "then": {
+                "required": ["long_term"]
+            }
+        },
+        "short_term": {
+            "type": "integer",
+            "minimum": MIN_SHORT_TERM_SMA,
+            "if": {
+                "properties": {
+                    "strategy": {
+                        "enum": [MEAN_STRATEGY]
+                    }
+                }
+            },
+            "then": {
+                "required": ["short_term"]
+            }
+        }
     },
     "additionalProperties": False
 }
 
 pairs_schema = {
     "type": "object",
-    "minProperties": 1,
-    "maxProperties": 5,
+    "minProperties": Robot.MIN_PAIRS,
+    "maxProperties": Robot.MAX_PAIRS,
     "patternProperties": {
         "^[A-Z]+$": {
             "required": [
