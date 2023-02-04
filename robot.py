@@ -1,6 +1,7 @@
 import json
 
 from statistics import mean
+from typing import Tuple
 
 from jsonschema import validate
 from jsonschema.exceptions import ValidationError
@@ -169,7 +170,7 @@ class Robot:
     pass
 
     # Log trade details
-    def _log_trade(self, symbol: str, order_type: str, quantity: float, price: float):
+    def _log_trade(self, symbol: str, order_type: str, quantity: float, price: float) -> None:
         log_file = open(f"{RESULTS_DIR_PREFIX}/{symbol}/{LOGGING_FILE_NAME}", "a")
         log_file.write(f"{datetime.now()}, {order_type}, {quantity}, {price}\n")
         log_file.close()
@@ -212,7 +213,8 @@ class Robot:
                 self._pairs_data[symbol]['df'] = self._pairs_data[symbol]['df'].iloc[1:]
                 # print(f"before append {self._pairs_data[symbol]['df']}")
                 # append neweset price to the end
-                self._pairs_data[symbol]['df'] = pd.concat([self._pairs_data[symbol]['df'], df], ignore_index=True)# self._pairs_data[symbol]['df'].append(df, ignore_index=True)
+                self._pairs_data[symbol]['df'] = pd.concat([self._pairs_data[symbol]['df'], df],
+                                                           ignore_index=True)
                 # print(f"after append {self._pairs_data[symbol]['df']}")
             # print(f"{symbol} recent prices {self._pairs_data[symbol]['df'].tail(4)['Close'].values} past prices {self._pairs_data[symbol]['df'].head(4)['Close'].values}")
         pass
@@ -220,7 +222,7 @@ class Robot:
     def _get_symbol_orders(self, symbol) -> dict:
         return self._client.get_all_orders(symbol=symbol)
 
-    def _get_assets_balance(self) -> list:
+    def _get_account_balances(self) -> list:
         return self._client.get_account()['balances']
 
     def _get_symbol_avg_price(self, symbol: str) -> float:
@@ -237,6 +239,23 @@ class Robot:
 
     def _get_symbol_info(self, symbol) -> dict:
         return self._client.get_symbol_info(symbol=symbol)
+
+    def _get_asset_value(self, asset_dict) -> Tuple[float, float]:
+        default_amounts = {'BNB': 1000.0,
+                           'BTC': 1.0,
+                           'BUSD': 10000.0,
+                           'ETH': 100.0,
+                           'LTC': 500.0,
+                           'TRX': 500000.0,
+                           'USDT': 10000.0,
+                           'XRP': 50000.0}
+
+        if asset_dict['asset'] in ['BUSD', 'USDT']:
+            return float(asset_dict['free']), default_amounts[asset_dict['asset']]
+        else:
+            ticker = self._client.get_ticker(symbol=asset_dict['asset'] + "BUSD")
+            price = float(ticker['lastPrice'])
+            return float(asset_dict['free']) * price, default_amounts[asset_dict['asset']] * price
 
     # GETTERS END
 
@@ -275,10 +294,25 @@ class Robot:
         pass
 
     def _print_balances(self) -> None:
-        balances = self._get_assets_balance()
+        balances = self._get_account_balances()
+        asset_values = {}
+        asset_default_values = {}
         if balances:
-            for balance in balances:
-                print(balance)
+            for asset in balances:
+                print(asset)
+                try:
+                    value, default_value = self._get_asset_value(asset)
+                    asset_values[asset['asset']] = value
+                    asset_default_values[asset['asset']] = default_value
+                except exceptions.BinanceAPIException as e:
+                    print(f"Error while fetching value for {asset['asset']}: {e}")
+                    continue
+
+        total_value = sum(asset_values.values())
+        print(f"Total value: {total_value} BUSD")
+        total_default_value = sum(asset_default_values.values())
+        print(f"Total default value: {total_default_value}")
+        print(f"Difference {(total_value - total_default_value):.2f} BUSD")
         pass
 
     def _print_positions(self) -> None:
