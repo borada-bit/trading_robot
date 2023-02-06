@@ -75,7 +75,6 @@ class Robot:
             self._timeout = data['timeout']
             self._interval = data['interval']
 
-
         with open(PAIRS_FILE_NAME, 'r') as pairs_file:
             data = json.load(pairs_file)
             validate(instance=data, schema=pairs_schema)
@@ -195,11 +194,6 @@ class Robot:
                 if self._make_order(symbol, position, config['trade_quantity'], price):
                     config['position'] = 'BUY'
         pass
-
-    def _log_trade(self, symbol: str, response: dict) -> None:
-        log_file = open(f"{RESULTS_DIR_PREFIX}/{symbol}/{self._strategy}_{LOGGING_FILE_NAME}", "a")
-        log_file.write(f"{response['transactTime']},{response['side']},{response['executedQty']},{response['price']}\n")
-        log_file.close()
 
     # HELPER FUNC END
 
@@ -381,7 +375,7 @@ class Robot:
             orders = self._get_symbol_orders(symbol=symbol)
             orders_filtered = [
                 {'time': order['time'], 'price': float(order['price']),
-                'side': order['side'], 'executed': float(order['executedQty'])} for order in orders]
+                 'side': order['side'], 'executed': float(order['executedQty'])} for order in orders]
             orders_df = pd.DataFrame(orders_filtered, columns=['time', 'price', 'side', 'executed'])
 
             start_str = str(orders_df['time'].iloc[0])
