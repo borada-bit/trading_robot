@@ -38,14 +38,11 @@ PAIRS_FILE_NAME = 'pairs.json'
 MIN_MENU_TIMEOUT = 60
 MAX_MENU_TIMEOUT = 3600
 
-ORDER_RETRY_WAIT_TIME = 15
-ORDER_MAX_RETRIES = 4
+ORDER_RETRY_WAIT_TIME = 10
+ORDER_MAX_RETRIES = 3
 
 MIN_LONG_TERM_SMA = 15
 MIN_SHORT_TERM_SMA = 5
-
-RESULTS_DIR_PREFIX = 'results'
-LOGGING_FILE_NAME = 'trades.log'
 
 MENU_START_INDEX = 0
 MENU_END_INDEX = 9
@@ -94,8 +91,6 @@ class Robot:
             elif self._strategy == TENDENCY_STRATEGY:
                 self._pairs_data[symbol]['df'] = pd.DataFrame
                 self._pairs_data[symbol]['arima_forecast'] = 0
-            log_file = open(f"{RESULTS_DIR_PREFIX}/{symbol}/{self._strategy}_{LOGGING_FILE_NAME}", "w")
-            log_file.write("timestamp,order_type,quantity,price\n")
 
     def run(self) -> None:
         if self._strategy == MEAN_STRATEGY:
@@ -145,7 +140,7 @@ class Robot:
     def _calculate_arima(self) -> None:
         for symbol in self._pairs_data:
             self._pairs_data[symbol]['arima_forecast'] = model_predict_arima(symbol, self._pairs_data[symbol]['df'])
-            print(self._pairs_data[symbol]['arima_forecast'])
+        pass
 
     def _get_choice(self) -> int:
         try:
@@ -180,6 +175,7 @@ class Robot:
             price = None
             if config['order_type'] == Client.ORDER_TYPE_LIMIT:
                 price = self._get_symbol_avg_price(symbol)
+            print(f"Trying to trade {symbol=} {position=} {price=} {long_sma=} {short_sma=}")
             if short_sma > long_sma and position == 'BUY':
                 if self._make_order(symbol, position, config['trade_quantity'], price):
                     config['position'] = 'SELL'
@@ -195,9 +191,9 @@ class Robot:
             if self._pairs_data[symbol]['arima_forecast'] > price and position == 'BUY':
                 if self._make_order(symbol, position, config['trade_quantity'], price):
                     config['position'] = 'SELL'
-                elif self._pairs_data[symbol]['arima_forecast'] < price and position == 'SELL':
-                    if self._make_order(symbol, position, config['trade_quantity'], price):
-                        config['position'] = 'BUY'
+            elif self._pairs_data[symbol]['arima_forecast'] < price and position == 'SELL':
+                if self._make_order(symbol, position, config['trade_quantity'], price):
+                    config['position'] = 'BUY'
         pass
 
     def _log_trade(self, symbol: str, response: dict) -> None:
@@ -291,7 +287,7 @@ class Robot:
 
     # Makes order at given price and returns result if successful or not
     def _make_order(self, symbol: str, side: str, qty: float, price: float = None) -> bool:
-        # Retry is useful if order type is MARKET
+        # Retry is useful if order type is LIMIT
         retries = 0
         order_completed = False
         while not order_completed and retries < ORDER_MAX_RETRIES:
@@ -307,7 +303,6 @@ class Robot:
                 print(f"{response['side']} {response['type']} {response['symbol']} {response['status']}")
                 if response['status'] == Client.ORDER_STATUS_FILLED:
                     order_completed = True
-                    self._log_trade(symbol, response)
                     break
             except exceptions.BinanceOrderException as e:
                 print(e.message)
@@ -382,25 +377,23 @@ class Robot:
         print(f"{symbol_info['filters'][0]}")
 
     def _graph_symbol_orders(self) -> None:
-        symbol = input("Enter symbol: ")
+        for symbol in self._pairs_data:
+            orders = self._get_symbol_orders(symbol=symbol)
+            orders_filtered = [
+                {'time': order['time'], 'price': float(order['price']),
+                'side': order['side'], 'executed': float(order['executedQty'])} for order in orders]
+            orders_df = pd.DataFrame(orders_filtered, columns=['time', 'price', 'side', 'executed'])
 
-        orders = self._get_symbol_orders(symbol=symbol)
-        orders_filtered = [
-            {'time': order['time'], 'price': float(order['price']),
-             'side': order['side'], 'executed': float(order['executedQty'])} for order in orders
-            if order['time'] > 1675463697770]
-        orders_df = pd.DataFrame(orders_filtered, columns=['time', 'id', 'price', 'side', 'executed'])
+            start_str = str(orders_df['time'].iloc[0])
+            end_str = str(orders_df['time'].iloc[-1])
 
-        start_str = str(orders_df['time'].iloc[0])
-        end_str = str(orders_df['time'].iloc[-1])
+            klines = self._client.get_historical_klines(symbol, self._interval, start_str=start_str, end_str=end_str)
+            klines = np.array(klines)
+            prices_df = pd.DataFrame(klines.reshape(-1, 12), dtype=float, columns=KLINES_COLUMNS)
+            prices_df['Open Time'] = pd.to_datetime(prices_df['Open Time'], unit='ms')
+            prices_df = prices_df[['Open Time', 'Close']]
 
-        klines = self._client.get_historical_klines(symbol, self._interval, start_str=start_str, end_str=end_str)
-        klines = np.array(klines)
-        prices_df = pd.DataFrame(klines.reshape(-1, 12), dtype=float, columns=KLINES_COLUMNS)
-        prices_df['Open Time'] = pd.to_datetime(prices_df['Open Time'], unit='ms')
-        prices_df = prices_df[['Open Time', 'Close']]
-
-        graph_orders(symbol, orders_df, prices_df)
+            graph_orders(symbol, orders_df, prices_df)
 
     # MENU OPTIONS END
 
