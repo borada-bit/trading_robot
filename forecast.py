@@ -7,7 +7,7 @@ ARIMA_MAX_Q_ORDER = 4
 
 
 def model_predict_arima(symbol: str, df):
-    print(f'Starting forecasting for {symbol}')
+    # print(f'Starting forecasting for {symbol}')
 
     df.set_index('Open Time', inplace=True)
     df = list(df['Close'])

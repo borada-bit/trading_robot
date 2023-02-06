@@ -2,7 +2,8 @@
     "api_key": "?",
     "api_secret": "?",
   "timeout": 900,
+  "interval": "15m",
+  "strategy": "MEAN_SMA",
   "long_term": 15,
-  "short_term": 5,
-  "interval": "15m"
+  "short_term": 5
 }
