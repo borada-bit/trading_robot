@@ -43,6 +43,8 @@ ORDER_MAX_RETRIES = 3
 
 MIN_LONG_TERM_SMA = 15
 MIN_SHORT_TERM_SMA = 5
+MIN_LONG_TERM_BAND = 0
+MAX_LONG_TERM_BAND = 0.1 # 10 percent
 
 MENU_START_INDEX = 0
 MENU_END_INDEX = 9
@@ -70,6 +72,7 @@ class Robot:
             if self._strategy == MEAN_STRATEGY:
                 self._long_term = data['long_term']
                 self._short_term = data['short_term']
+                self._band = data['band']
                 if self._short_term >= self._long_term:
                     raise ValidationError(message="Short term should be lower than long term!")
             self._timeout = data['timeout']
@@ -86,6 +89,7 @@ class Robot:
             if self._strategy == MEAN_STRATEGY:
                 self._pairs_data[symbol]['long_sma'] = None
                 self._pairs_data[symbol]['short_sma'] = None
+                self._pairs_data[symbol]['long_band'] = None
                 self._pairs_data[symbol]['price_list'] = []
             elif self._strategy == TENDENCY_STRATEGY:
                 self._pairs_data[symbol]['df'] = pd.DataFrame
@@ -134,6 +138,7 @@ class Robot:
         for symbol in self._pairs_data:
             self._pairs_data[symbol]['long_sma'] = mean(self._pairs_data[symbol]['price_list'])
             self._pairs_data[symbol]['short_sma'] = mean(self._pairs_data[symbol]['price_list'][0:self._short_term])
+            self._pairs_data[symbol]['long_band'] = self._pairs_data[symbol]['long_sma'] * self._band
         pass
 
     def _calculate_arima(self) -> None:
@@ -171,14 +176,15 @@ class Robot:
             position = config['position']
             long_sma = self._pairs_data[symbol]['long_sma']
             short_sma = self._pairs_data[symbol]['short_sma']
+            band = self._pairs_data[symbol]['long_band']
             price = None
             if config['order_type'] == Client.ORDER_TYPE_LIMIT:
                 price = self._get_symbol_avg_price(symbol)
             print(f"Trying to trade {symbol=} {position=} {price=} {long_sma=} {short_sma=}")
-            if short_sma > long_sma and position == 'BUY':
+            if short_sma > (long_sma + band) and position == 'BUY':
                 if self._make_order(symbol, position, config['trade_quantity'], price):
                     config['position'] = 'SELL'
-            elif short_sma < long_sma and position == 'SELL':
+            elif short_sma < (long_sma + band) and position == 'SELL':
                 if self._make_order(symbol, position, config['trade_quantity'], price):
                     config['position'] = 'BUY'
         pass
@@ -406,32 +412,24 @@ config_schema = {
         },
         "long_term": {
             "type": "integer",
-            "minimum": MIN_LONG_TERM_SMA,
-            "if": {
-                "properties": {
-                    "strategy": {
-                        "enum": [MEAN_STRATEGY]
-                    }
-                }
-            },
-            "then": {
-                "required": ["long_term"]
-            }
+            "minimum": MIN_LONG_TERM_SMA
         },
         "short_term": {
             "type": "integer",
-            "minimum": MIN_SHORT_TERM_SMA,
-            "if": {
-                "properties": {
-                    "strategy": {
-                        "enum": [MEAN_STRATEGY]
-                    }
-                }
-            },
-            "then": {
-                "required": ["short_term"]
-            }
+            "minimum": MIN_SHORT_TERM_SMA
+        },
+        "band": {
+            "type": "number",
+            "format": "float",
+            "minimum": MIN_LONG_TERM_BAND,
+            "maximum": MAX_LONG_TERM_BAND
         }
+    },
+    "if": {
+        "properties": {"strategy": {"const": "MEAN_SMA"}}
+    },
+    "then": {
+        "required": ["long_term", "short_term", "band"]
     },
     "additionalProperties": False
 }
