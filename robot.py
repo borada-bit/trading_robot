@@ -44,7 +44,11 @@ ORDER_MAX_RETRIES = 3
 MIN_LONG_TERM_SMA = 15
 MIN_SHORT_TERM_SMA = 5
 MIN_LONG_TERM_BAND = 0
-MAX_LONG_TERM_BAND = 0.1 # 10 percent
+MAX_LONG_TERM_BAND = 0.1  # 10 percent
+MIN_ENTRY_TRESHOLD = 1
+MAX_ENTRY_TRESHOLD = 3
+MIN_EXIT_TRESHOLD = 0.1
+MAX_EXIT_TRESHOLD = 1
 
 MENU_START_INDEX = 0
 MENU_END_INDEX = 9
@@ -57,6 +61,8 @@ KLINES_COLUMNS = ['Open Time', 'Open', 'High', 'Low', 'Close', 'Volume', 'Close 
 TENDENCY_STRATEGY = 'TENDENCY_ARIMA'
 # Expecting that price will return to the mean using long SMA and short SMA
 MEAN_STRATEGY = 'MEAN_SMA'
+# Pairs trading
+PT_STRATEGY = 'PT_STRATEGY'
 
 
 class Robot:
@@ -75,6 +81,11 @@ class Robot:
                 self._band = data['band']
                 if self._short_term >= self._long_term:
                     raise ValidationError(message="Short term should be lower than long term!")
+            elif self._strategy == PT_STRATEGY:
+                self._entry_treshold_ratio = data['entry_treshold']
+                self._exit_treshold_ratio = data['exit_treshold']
+                if self._exit_treshold_ratio >= self._entry_treshold_ratio:
+                    raise ValidationError(message="Exit treshold should be lower than entry treshold!")
             self._timeout = data['timeout']
             self._interval = data['interval']
 
@@ -83,7 +94,17 @@ class Robot:
             validate(instance=data, schema=pairs_schema)
             self._pairs_config = data
 
-        self._pairs_data = {key: {} for key in self._pairs_config}
+        self._trading_pairs = self._pairs_config["pairs"]
+        symbols = set()
+        for pair in self._trading_pairs:
+            for symbol in pair.values():
+                symbols.add(symbol)
+            pair['spread'] = pd.DataFrame
+            pair['mean'] = 0
+            pair['std'] = 0
+        print(self._trading_pairs)
+        self._pairs_data = {key: {} for key in self._pairs_config if key != "pairs" and key in symbols}
+
         for symbol in self._pairs_data.keys():
             self._pairs_data[symbol]['tick_size'] = self._get_ticksize(symbol)
             if self._strategy == MEAN_STRATEGY:
@@ -146,6 +167,27 @@ class Robot:
             self._pairs_data[symbol]['arima_forecast'] = model_predict_arima(symbol, self._pairs_data[symbol]['df'])
         pass
 
+    def _calculate_spread(self) -> None:
+        for pair in self._trading_pairs:
+            asset1_data = self._pairs_data[pair['asset1']]['df']
+            asset2_data = self._pairs_data[pair['asset2']]['df']
+
+            print(f'Current symbols :{pair["asset1"]} and {pair["asset2"]}')
+            asset1_returns = (asset1_data['Close'].diff().dropna()).to_frame()
+            asset2_returns = (asset2_data['Close'].diff().dropna()).to_frame()
+
+            asset1_returns.columns.values[0] = 'return'
+            asset2_returns.columns.values[0] = 'return'
+
+            spread = (asset1_returns['return'] - asset2_returns['return']).to_frame()
+            spread.columns.values[0] = 'return'
+            print(f'mean: {spread["return"].mean()}')
+            print(f'std: {spread["return"].std()}')
+            pair['mean'] = spread["return"].mean()
+            pair['std'] = spread["return"].std()
+            pair['spread'] = spread
+        pass
+
     def _get_choice(self) -> int:
         try:
             user_string = inputimeout(prompt='>> ', timeout=self._timeout)
@@ -169,6 +211,10 @@ class Robot:
             self._get_klines_as_df(klines)
             self._calculate_arima()
             self._trade_arima()
+        elif self._strategy == PT_STRATEGY:
+            self._get_klines_as_df(klines)
+            self._calculate_spread()
+            self._trade_pairs()
         pass
 
     def _trade_sma(self) -> None:
@@ -201,6 +247,10 @@ class Robot:
                     config['position'] = 'BUY'
         pass
 
+    def _trade_pairs(self) -> None:
+        for pair in self._trading_pairs:
+            pass
+        pass
     # HELPER FUNC END
 
     # GETTERS START
