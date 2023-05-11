@@ -102,7 +102,6 @@ class Robot:
             pair['spread'] = pd.DataFrame
             pair['mean'] = 0
             pair['std'] = 0
-        print(self._trading_pairs)
         self._pairs_data = {key: {} for key in self._pairs_config if key != "pairs" and key in symbols}
 
         for symbol in self._pairs_data.keys():
@@ -115,6 +114,8 @@ class Robot:
             elif self._strategy == TENDENCY_STRATEGY:
                 self._pairs_data[symbol]['df'] = pd.DataFrame
                 self._pairs_data[symbol]['arima_forecast'] = 0
+            elif self._strategy == PT_STRATEGY:
+                self._pairs_data[symbol]['df'] = pd.DataFrame
 
     def run(self) -> None:
         if self._strategy == MEAN_STRATEGY:
@@ -169,8 +170,9 @@ class Robot:
 
     def _calculate_spread(self) -> None:
         for pair in self._trading_pairs:
-            asset1_data = self._pairs_data[pair['asset1']]['df']
-            asset2_data = self._pairs_data[pair['asset2']]['df']
+            # setting open time as index is importante!
+            asset1_data = self._pairs_data[pair['asset1']]['df'].set_index('Open Time')
+            asset2_data = self._pairs_data[pair['asset2']]['df'].set_index('Open Time')
 
             print(f'Current symbols :{pair["asset1"]} and {pair["asset2"]}')
             asset1_returns = (asset1_data['Close'].diff().dropna()).to_frame()
@@ -181,8 +183,6 @@ class Robot:
 
             spread = (asset1_returns['return'] - asset2_returns['return']).to_frame()
             spread.columns.values[0] = 'return'
-            print(f'mean: {spread["return"].mean()}')
-            print(f'std: {spread["return"].std()}')
             pair['mean'] = spread["return"].mean()
             pair['std'] = spread["return"].std()
             pair['spread'] = spread
@@ -249,7 +249,25 @@ class Robot:
 
     def _trade_pairs(self) -> None:
         for pair in self._trading_pairs:
-            pass
+            # Compute current distance
+            # current_distance = btc_returns.iloc[i] - eth_returns.iloc[i]
+            print(f"current distance is {pair['spread']['return'].iloc[-1]} mean:{pair['mean']} std:{pair['std']}")
+
+            current_distance = pair['spread']['return'].iloc[-1]
+            # Check if we should enter a position
+            entry_threshold = pair['std'] * self._entry_treshold_ratio
+            exit_threshold = pair['std'] * self._exit_treshold_ratio
+            if current_distance > pair['mean'] + entry_threshold:
+                btc_position = 1
+                eth_position = -1
+            elif current_distance < pair['mean'] - entry_threshold:
+                btc_position = -1
+                eth_position = 1
+            # Check if we should exit a position
+            elif abs(current_distance) < exit_threshold:
+                btc_position = 0
+                eth_position = 0
+                pass
         pass
     # HELPER FUNC END
 
