@@ -102,6 +102,7 @@ class Robot:
             pair['spread'] = pd.DataFrame
             pair['mean'] = 0
             pair['std'] = 0
+            pair['init'] = False
         self._pairs_data = {key: {} for key in self._pairs_config if key != "pairs" and key in symbols}
 
         for symbol in self._pairs_data.keys():
@@ -124,6 +125,9 @@ class Robot:
         elif self._strategy == TENDENCY_STRATEGY:
             self._get_klines_as_df(limit=1000)
             self._calculate_arima()
+        elif self._strategy == PT_STRATEGY:
+            self._get_klines_as_df(limit=1000)
+            self._calculate_spread()
 
         print_menu()
         quit_loop = False
@@ -249,24 +253,58 @@ class Robot:
 
     def _trade_pairs(self) -> None:
         for pair in self._trading_pairs:
-            # Compute current distance
-            # current_distance = btc_returns.iloc[i] - eth_returns.iloc[i]
-            print(f"current distance is {pair['spread']['return'].iloc[-1]} mean:{pair['mean']} std:{pair['std']}")
 
+            # Compute current distance
             current_distance = pair['spread']['return'].iloc[-1]
-            # Check if we should enter a position
+            # print(f"current distance is {pair['spread']['return'].iloc[-1]} mean:{pair['mean']} std:{pair['std']}")
+
+            # Check entering positions
             entry_threshold = pair['std'] * self._entry_treshold_ratio
             exit_threshold = pair['std'] * self._exit_treshold_ratio
             if current_distance > pair['mean'] + entry_threshold:
-                btc_position = 1
-                eth_position = -1
+                print(f"Should buy {pair['asset1']} and sell {pair['asset2']}")
+                if not pair['init']:
+                    self._make_order(pair['asset1'], 'BUY', self._pairs_config[pair['asset1']]['trade_quantity'])
+                    self._pairs_config[pair['asset1']]['position'] = 'SELL'
+                    self._make_order(pair['asset2'], 'SELL', self._pairs_config[pair['asset1']]['trade_quantity'])
+                    self._pairs_config[pair['asset2']]['position'] = 'BUY'
+                    pair['init'] = True
+
+                if self._pairs_config[pair['asset1']]['position'] == 'BUY':
+                    self._make_order(pair['asset1'], 'BUY', self._pairs_config[pair['asset1']]['trade_quantity'])
+                    self._pairs_config[pair['asset1']]['position'] = 'SELL'
+                if self._pairs_config[pair['asset2']]['position'] == 'SELL':
+                    self._make_order(pair['asset2'], 'SELL', self._pairs_config[pair['asset1']]['trade_quantity'])
+                    self._pairs_config[pair['asset2']]['position'] = 'BUY'
+                # print("BUY BTC, SELL ETH")
+                # btc_position = 1
+                # eth_position = -1
             elif current_distance < pair['mean'] - entry_threshold:
-                btc_position = -1
-                eth_position = 1
+                if not pair['init']:
+                    print(f"Should sell {pair['asset1']} and buy {pair['asset2']}")
+                    self._make_order(pair['asset1'], 'SELL', self._pairs_config[pair['asset1']]['trade_quantity'])
+                    self._pairs_config[pair['asset1']]['position'] = 'BUY'
+                    self._make_order(pair['asset2'], 'BUY', self._pairs_config[pair['asset2']]['trade_quantity'])
+                    self._pairs_config[pair['asset2']]['position'] = 'SELL'
+                    pair['init'] = True
+
+                if self._pairs_config[pair['asset1']]['position'] == 'SELL':
+                    self._make_order(pair['asset1'], 'SELL', self._pairs_config[pair['asset1']]['trade_quantity'])
+                    self._pairs_config[pair['asset1']]['position'] = 'BUY'
+                if self._pairs_config[pair['asset2']]['position'] == 'BUY':
+                    self._make_order(pair['asset2'], 'BUY', self._pairs_config[pair['asset2']]['trade_quantity'])
+                    self._pairs_config[pair['asset2']]['position'] = 'SELL'
             # Check if we should exit a position
             elif abs(current_distance) < exit_threshold:
-                btc_position = 0
-                eth_position = 0
+
+                print("NOTHING")
+                if self._pairs_config[pair['asset1']]['position'] == 'SELL':
+                    self._make_order(pair['asset1'], 'SELL', self._pairs_config[pair['asset1']]['trade_quantity'])
+                    self._pairs_config[pair['asset1']]['position'] = 'BUY'
+                if self._pairs_config[pair['asset2']]['position'] == 'SELL':
+                    self._make_order(pair['asset2'], 'SELL', self._pairs_config[pair['asset2']]['trade_quantity'])
+                    # config['position'] = 'BUY'
+                    self._pairs_config[pair['asset2']]['position'] = 'BUY'
                 pass
         pass
     # HELPER FUNC END
@@ -285,6 +323,7 @@ class Robot:
         close_price_index = 4
         for symbol in self._pairs_data:
             klines = self._client.get_historical_klines(symbol, self._interval, limit=limit)
+            assert (len(klines) == limit)
             if self._pairs_data[symbol]['price_list']:
                 self._pairs_data[symbol]['price_list'].pop()
             for kline in klines:
@@ -476,7 +515,7 @@ config_schema = {
         "interval": {"enum": ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "8h", "12h", "1d", "3d", "1w", "1M"]},
         "strategy": {
             "type": "string",
-            "enum": [TENDENCY_STRATEGY, MEAN_STRATEGY]
+            "enum": [TENDENCY_STRATEGY, MEAN_STRATEGY, PT_STRATEGY]
         },
         "long_term": {
             "type": "integer",
@@ -491,6 +530,18 @@ config_schema = {
             "format": "float",
             "minimum": MIN_LONG_TERM_BAND,
             "maximum": MAX_LONG_TERM_BAND
+        },
+        "entry_treshold": {
+            "type": "number",
+            "format": "float",
+            "minimum": MIN_ENTRY_TRESHOLD,
+            "maximum": MAX_ENTRY_TRESHOLD
+        },
+        "exit_treshold": {
+            "type": "number",
+            "format": "float",
+            "minimum": MIN_EXIT_TRESHOLD,
+            "maximum": MAX_EXIT_TRESHOLD
         }
     },
     "if": {
@@ -499,13 +550,19 @@ config_schema = {
     "then": {
         "required": ["long_term", "short_term", "band"]
     },
+    "if": {
+        "properties": {"strategy": {"const": "PT_STRATEGY"}}
+    },
+    "then": {
+        "required": ["entry_treshold", "exit_treshold"]
+    },
     "additionalProperties": False
 }
 
 pairs_schema = {
     "type": "object",
-    "minProperties": Robot.MIN_PAIRS,
-    "maxProperties": Robot.MAX_PAIRS,
+    "minProperties": Robot.MIN_PAIRS+1,
+    "maxProperties": Robot.MAX_PAIRS+1,
     "patternProperties": {
         "^[A-Z]+$": {
             "required": [
@@ -570,6 +627,25 @@ pairs_schema = {
                 }
             },
             "additionalProperties": False
+        }
+    },
+    "optional": ["pairs"],
+    "properties": {
+        "pairs": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "asset1": {
+                        "type": "string"
+                    },
+                    "asset2": {
+                        "type": "string"
+                    }
+                },
+                "required": ["asset1", "asset2"],
+                "additionalProperties": False
+            }
         }
     },
     "additionalProperties": False
