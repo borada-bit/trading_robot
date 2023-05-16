@@ -242,7 +242,9 @@ class Robot:
     def _trade_arima(self) -> None:
         for symbol, config in self._pairs_config.items():
             position = config['position']
-            price = self._get_symbol_avg_price(symbol)
+            price = None
+            if config['order_type'] == "LIMIT":
+                price = self._get_symbol_avg_price(symbol)
             if self._pairs_data[symbol]['arima_forecast'] > price and position == 'BUY':
                 if self._make_order(symbol, position, config['trade_quantity'], price):
                     config['position'] = 'SELL'
