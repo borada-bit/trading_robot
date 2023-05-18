@@ -631,24 +631,5 @@ pairs_schema = {
             "additionalProperties": False
         }
     },
-    "optional": ["pairs"],
-    "properties": {
-        "pairs": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "asset1": {
-                        "type": "string"
-                    },
-                    "asset2": {
-                        "type": "string"
-                    }
-                },
-                "required": ["asset1", "asset2"],
-                "additionalProperties": False
-            }
-        }
-    },
     "additionalProperties": False
 }
