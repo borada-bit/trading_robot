@@ -268,7 +268,7 @@ class Robot:
                 if not pair['init']:
                     self._make_order(pair['asset1'], 'BUY', self._pairs_config[pair['asset1']]['trade_quantity'])
                     self._pairs_config[pair['asset1']]['position'] = 'SELL'
-                    self._make_order(pair['asset2'], 'SELL', self._pairs_config[pair['asset1']]['trade_quantity'])
+                    self._make_order(pair['asset2'], 'SELL', self._pairs_config[pair['asset2']]['trade_quantity'])
                     self._pairs_config[pair['asset2']]['position'] = 'BUY'
                     pair['init'] = True
 
