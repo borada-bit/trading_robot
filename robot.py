@@ -25,7 +25,7 @@ def print_menu():
     4. Print order.
     5. Cancel order manually.
     6. Print symbol price filter.
-    7. Graph symbol orders.
+    7. Make manual market order.
     ----------------------------------
     9. Print menu.
     0. Quit.""")
@@ -35,20 +35,20 @@ def print_menu():
 CONFIG_FILE_NAME = 'config.json'
 PAIRS_FILE_NAME = 'pairs.json'
 
-MIN_MENU_TIMEOUT = 60
-MAX_MENU_TIMEOUT = 3600
+MIN_MENU_TIMEOUT_S = 60
+MAX_MENU_TIMEOUT_S = 3600  # 1 hour
 
-ORDER_RETRY_WAIT_TIME = 10
-ORDER_MAX_RETRIES = 3
+ORDER_RETRY_WAIT_TIME_S = 10  # 10 seconds
+ORDER_MAX_RETRIES = 3  # LIMIT order max retries
 
-MIN_LONG_TERM_SMA = 15
 MIN_SHORT_TERM_SMA = 5
+MIN_LONG_TERM_SMA = 15  #
 MIN_LONG_TERM_BAND = 0
 MAX_LONG_TERM_BAND = 0.1  # 10 percent
 MIN_ENTRY_TRESHOLD = 1
-MAX_ENTRY_TRESHOLD = 3
+MAX_ENTRY_TRESHOLD = 3  # 3 std
 MIN_EXIT_TRESHOLD = 0.1
-MAX_EXIT_TRESHOLD = 1
+MAX_EXIT_TRESHOLD = 1  # 1 std
 
 MENU_START_INDEX = 0
 MENU_END_INDEX = 9
@@ -86,6 +86,7 @@ class Robot:
                 self._exit_treshold_ratio = data['exit_treshold']
                 if self._exit_treshold_ratio >= self._entry_treshold_ratio:
                     raise ValidationError(message="Exit treshold should be lower than entry treshold!")
+                self._trading_pairs = data["pairs"]
             self._timeout = data['timeout']
             self._interval = data['interval']
 
@@ -94,16 +95,17 @@ class Robot:
             validate(instance=data, schema=pairs_schema)
             self._pairs_config = data
 
-        self._trading_pairs = self._pairs_config["pairs"]
         symbols = set()
-        for pair in self._trading_pairs:
-            for symbol in pair.values():
-                symbols.add(symbol)
-            pair['spread'] = pd.DataFrame
-            pair['mean'] = 0
-            pair['std'] = 0
-            pair['init'] = False
-        self._pairs_data = {key: {} for key in self._pairs_config if key != "pairs" and key in symbols}
+        if self._strategy == PT_STRATEGY:
+            for pair in self._trading_pairs:
+                for symbol in pair.values():
+                    symbols.add(symbol)
+                pair['spread'] = pd.DataFrame
+                pair['mean'] = 0
+                pair['std'] = 0
+                pair['init'] = False
+        # this if check is not needed anymore
+        self._pairs_data = {key: {} for key in self._pairs_config}
 
         for symbol in self._pairs_data.keys():
             self._pairs_data[symbol]['tick_size'] = self._get_ticksize(symbol)
@@ -150,7 +152,7 @@ class Robot:
             elif choice == 6:
                 self._print_symbol_info()
             elif choice == 7:
-                self._graph_symbol_orders()
+                self._try_to_make_order()
             elif choice == 9:
                 print_menu()
             elif choice == MENU_TRADE_INDEX:
@@ -178,7 +180,7 @@ class Robot:
             asset1_data = self._pairs_data[pair['asset1']]['df'].set_index('Open Time')
             asset2_data = self._pairs_data[pair['asset2']]['df'].set_index('Open Time')
 
-            print(f'Current symbols :{pair["asset1"]} and {pair["asset2"]}')
+            # print(f'Current symbols :{pair["asset1"]} and {pair["asset2"]}')
             asset1_returns = (asset1_data['Close'].diff().dropna()).to_frame()
             asset2_returns = (asset2_data['Close'].diff().dropna()).to_frame()
 
@@ -230,7 +232,7 @@ class Robot:
             price = None
             if config['order_type'] == Client.ORDER_TYPE_LIMIT:
                 price = self._get_symbol_avg_price(symbol)
-            print(f"Trying to trade {symbol=} {position=} {price=} {long_sma=} {short_sma=}")
+            print(f"Trying to trade {symbol=} {position=} {price=} {long_sma=} {short_sma=} {band=}")
             if short_sma > (long_sma + band) and position == 'BUY':
                 if self._make_order(symbol, position, config['trade_quantity'], price):
                     config['position'] = 'SELL'
@@ -277,9 +279,7 @@ class Robot:
                 if self._pairs_config[pair['asset2']]['position'] == 'SELL':
                     self._make_order(pair['asset2'], 'SELL', self._pairs_config[pair['asset2']]['trade_quantity'])
                     self._pairs_config[pair['asset2']]['position'] = 'BUY'
-                # print("BUY BTC, SELL ETH")
-                # btc_position = 1
-                # eth_position = -1
+            # enter position
             elif current_distance < pair['mean'] - entry_threshold:
                 print(f"Should sell {pair['asset1']} and buy {pair['asset2']}")
                 if not pair['init']:
@@ -297,8 +297,8 @@ class Robot:
                     self._pairs_config[pair['asset2']]['position'] = 'SELL'
             # exit position
             elif abs(current_distance) < exit_threshold:
-
-                print("NOTHING")
+                
+                print("CLOSING POSITION IF ENTERED")
                 if self._pairs_config[pair['asset1']]['position'] == 'SELL':
                     self._make_order(pair['asset1'], 'SELL', self._pairs_config[pair['asset1']]['trade_quantity'])
                     self._pairs_config[pair['asset1']]['position'] = 'BUY'
@@ -350,6 +350,9 @@ class Robot:
                 # append neweset price to the end
                 self._pairs_data[symbol]['df'] = pd.concat([self._pairs_data[symbol]['df'], df],
                                                            ignore_index=True)
+            if limit == 1000 and self._strategy == PT_STRATEGY:
+                # 2023-05-03 FIRST CLOSE PRICE IS TOO HIGH FOR BTC so just removing first element of each DF
+                self._pairs_data[symbol]['df'] = self._pairs_data[symbol]['df'].iloc[1:]
         pass
 
     def _get_symbol_orders(self, symbol) -> dict:
@@ -403,6 +406,7 @@ class Robot:
         order_completed = False
         while not order_completed and retries < ORDER_MAX_RETRIES:
             try:
+                print(f"Trading {symbol} for {side} and {price}")
                 response = self._client.create_order(
                     symbol=symbol,
                     side=side,
@@ -418,7 +422,7 @@ class Robot:
             except exceptions.BinanceOrderException as e:
                 print(e.message)
             retries += 1
-            time.sleep(ORDER_RETRY_WAIT_TIME)
+            time.sleep(ORDER_RETRY_WAIT_TIME_S)
         return order_completed
 
     # OTHER API CALLS END
@@ -459,7 +463,7 @@ class Robot:
 
     def _print_symbol_orders(self) -> None:
         symbol = input("Enter symbol: ")
-        last_n_items = 5
+        last_n_items = int(input("Enter how many last orders to print: "))
         orders = self._get_symbol_orders(symbol=symbol)
         if orders:
             orders = orders[-last_n_items:]
@@ -506,6 +510,21 @@ class Robot:
 
             graph_orders(symbol, orders_df, prices_df)
 
+    def _try_to_make_order(self) -> None:
+        print("Will be placing market order!")
+        symbol = input("Enter symbol: ")
+        side = input("Enter side: ")
+        qty = input("Enter quantity: ")
+        response = self._client.create_order(
+            symbol=symbol,
+            side=side,
+            type=Client.ORDER_TYPE_MARKET,
+            quantity=qty,
+        )
+        if response['status'] == Client.ORDER_STATUS_FILLED:
+            print("Order placed")
+        else:
+            print("Failed to make order")
     # MENU OPTIONS END
 
 
