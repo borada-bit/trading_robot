@@ -6,6 +6,9 @@ Trading bot to trade using python-binance API on Binance testnet.
 * python 3.8
 * python-binance
 * inputimeout
+* pmdarima
+* statsmodels
+* jsonschema
 
 # config.json
 
