@@ -20,7 +20,8 @@ This file is used to config robot. First are api key and secret to connnect to b
   "timeout": 60,
   "interval": "15m"
   "long_term": 15,
-  "short_term": 5
+  "short_term": 5,
+  "band": 0.001
 }
 ```
 # pairs.json
