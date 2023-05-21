@@ -25,7 +25,7 @@ def print_menu():
     4. Print order.
     5. Cancel order manually.
     6. Print symbol price filter.
-    7. Graph symbol orders.
+    7. Make manual market order.
     ----------------------------------
     9. Print menu.
     0. Quit.""")
@@ -35,14 +35,20 @@ def print_menu():
 CONFIG_FILE_NAME = 'config.json'
 PAIRS_FILE_NAME = 'pairs.json'
 
-MIN_MENU_TIMEOUT = 60
-MAX_MENU_TIMEOUT = 3600
+MIN_MENU_TIMEOUT_S = 60
+MAX_MENU_TIMEOUT_S = 3600  # 1 hour
 
-ORDER_RETRY_WAIT_TIME = 10
-ORDER_MAX_RETRIES = 3
+ORDER_RETRY_WAIT_TIME_S = 10  # 10 seconds
+ORDER_MAX_RETRIES = 3  # LIMIT order max retries
 
-MIN_LONG_TERM_SMA = 15
 MIN_SHORT_TERM_SMA = 5
+MIN_LONG_TERM_SMA = 15  #
+MIN_LONG_TERM_BAND = 0
+MAX_LONG_TERM_BAND = 0.1  # 10 percent
+MIN_ENTRY_TRESHOLD = 1
+MAX_ENTRY_TRESHOLD = 3  # 3 std
+MIN_EXIT_TRESHOLD = 0.1
+MAX_EXIT_TRESHOLD = 1  # 1 std
 
 MENU_START_INDEX = 0
 MENU_END_INDEX = 9
@@ -55,6 +61,8 @@ KLINES_COLUMNS = ['Open Time', 'Open', 'High', 'Low', 'Close', 'Volume', 'Close 
 TENDENCY_STRATEGY = 'TENDENCY_ARIMA'
 # Expecting that price will return to the mean using long SMA and short SMA
 MEAN_STRATEGY = 'MEAN_SMA'
+# Pairs trading using std and hoping that spread returns to the mean
+PT_STRATEGY = 'PT_STRATEGY'
 
 
 class Robot:
@@ -70,8 +78,15 @@ class Robot:
             if self._strategy == MEAN_STRATEGY:
                 self._long_term = data['long_term']
                 self._short_term = data['short_term']
+                self._band = data['band']
                 if self._short_term >= self._long_term:
                     raise ValidationError(message="Short term should be lower than long term!")
+            elif self._strategy == PT_STRATEGY:
+                self._entry_treshold_ratio = data['entry_treshold']
+                self._exit_treshold_ratio = data['exit_treshold']
+                if self._exit_treshold_ratio >= self._entry_treshold_ratio:
+                    raise ValidationError(message="Exit treshold should be lower than entry treshold!")
+                self._trading_pairs = data["pairs"]
             self._timeout = data['timeout']
             self._interval = data['interval']
 
@@ -80,16 +95,30 @@ class Robot:
             validate(instance=data, schema=pairs_schema)
             self._pairs_config = data
 
+        symbols = set()
+        if self._strategy == PT_STRATEGY:
+            for pair in self._trading_pairs:
+                for symbol in pair.values():
+                    symbols.add(symbol)
+                pair['spread'] = pd.DataFrame
+                pair['mean'] = 0
+                pair['std'] = 0
+                pair['init'] = False
+        # this if check is not needed anymore
         self._pairs_data = {key: {} for key in self._pairs_config}
+
         for symbol in self._pairs_data.keys():
             self._pairs_data[symbol]['tick_size'] = self._get_ticksize(symbol)
             if self._strategy == MEAN_STRATEGY:
                 self._pairs_data[symbol]['long_sma'] = None
                 self._pairs_data[symbol]['short_sma'] = None
+                self._pairs_data[symbol]['long_band'] = None
                 self._pairs_data[symbol]['price_list'] = []
             elif self._strategy == TENDENCY_STRATEGY:
                 self._pairs_data[symbol]['df'] = pd.DataFrame
                 self._pairs_data[symbol]['arima_forecast'] = 0
+            elif self._strategy == PT_STRATEGY:
+                self._pairs_data[symbol]['df'] = pd.DataFrame
 
     def run(self) -> None:
         if self._strategy == MEAN_STRATEGY:
@@ -98,6 +127,9 @@ class Robot:
         elif self._strategy == TENDENCY_STRATEGY:
             self._get_klines_as_df(limit=1000)
             self._calculate_arima()
+        elif self._strategy == PT_STRATEGY:
+            self._get_klines_as_df(limit=1000)
+            self._calculate_spread()
 
         print_menu()
         quit_loop = False
@@ -120,7 +152,7 @@ class Robot:
             elif choice == 6:
                 self._print_symbol_info()
             elif choice == 7:
-                self._graph_symbol_orders()
+                self._try_to_make_order()
             elif choice == 9:
                 print_menu()
             elif choice == MENU_TRADE_INDEX:
@@ -134,11 +166,32 @@ class Robot:
         for symbol in self._pairs_data:
             self._pairs_data[symbol]['long_sma'] = mean(self._pairs_data[symbol]['price_list'])
             self._pairs_data[symbol]['short_sma'] = mean(self._pairs_data[symbol]['price_list'][0:self._short_term])
+            self._pairs_data[symbol]['long_band'] = self._pairs_data[symbol]['long_sma'] * self._band
         pass
 
     def _calculate_arima(self) -> None:
         for symbol in self._pairs_data:
             self._pairs_data[symbol]['arima_forecast'] = model_predict_arima(symbol, self._pairs_data[symbol]['df'])
+        pass
+
+    def _calculate_spread(self) -> None:
+        for pair in self._trading_pairs:
+            # setting open time as index is importante!
+            asset1_data = self._pairs_data[pair['asset1']]['df'].set_index('Open Time')
+            asset2_data = self._pairs_data[pair['asset2']]['df'].set_index('Open Time')
+
+            # print(f'Current symbols :{pair["asset1"]} and {pair["asset2"]}')
+            asset1_returns = (asset1_data['Close'].diff().dropna()).to_frame()
+            asset2_returns = (asset2_data['Close'].diff().dropna()).to_frame()
+
+            asset1_returns.columns.values[0] = 'return'
+            asset2_returns.columns.values[0] = 'return'
+
+            spread = (asset1_returns['return'] - asset2_returns['return']).to_frame()
+            spread.columns.values[0] = 'return'
+            pair['mean'] = spread["return"].mean()
+            pair['std'] = spread["return"].std()
+            pair['spread'] = spread
         pass
 
     def _get_choice(self) -> int:
@@ -164,6 +217,10 @@ class Robot:
             self._get_klines_as_df(klines)
             self._calculate_arima()
             self._trade_arima()
+        elif self._strategy == PT_STRATEGY:
+            self._get_klines_as_df(klines)
+            self._calculate_spread()
+            self._trade_pairs()
         pass
 
     def _trade_sma(self) -> None:
@@ -171,14 +228,15 @@ class Robot:
             position = config['position']
             long_sma = self._pairs_data[symbol]['long_sma']
             short_sma = self._pairs_data[symbol]['short_sma']
+            band = self._pairs_data[symbol]['long_band']
             price = None
             if config['order_type'] == Client.ORDER_TYPE_LIMIT:
                 price = self._get_symbol_avg_price(symbol)
-            print(f"Trying to trade {symbol=} {position=} {price=} {long_sma=} {short_sma=}")
-            if short_sma > long_sma and position == 'BUY':
+            print(f"Trying to trade {symbol=} {position=} {price=} {long_sma=} {short_sma=} {band=}")
+            if short_sma > (long_sma + band) and position == 'BUY':
                 if self._make_order(symbol, position, config['trade_quantity'], price):
                     config['position'] = 'SELL'
-            elif short_sma < long_sma and position == 'SELL':
+            elif short_sma < (long_sma + band) and position == 'SELL':
                 if self._make_order(symbol, position, config['trade_quantity'], price):
                     config['position'] = 'BUY'
         pass
@@ -186,13 +244,71 @@ class Robot:
     def _trade_arima(self) -> None:
         for symbol, config in self._pairs_config.items():
             position = config['position']
-            price = self._get_symbol_avg_price(symbol)
+            price = None
+            if config['order_type'] == "LIMIT":
+                price = self._get_symbol_avg_price(symbol)
             if self._pairs_data[symbol]['arima_forecast'] > price and position == 'BUY':
                 if self._make_order(symbol, position, config['trade_quantity'], price):
                     config['position'] = 'SELL'
             elif self._pairs_data[symbol]['arima_forecast'] < price and position == 'SELL':
                 if self._make_order(symbol, position, config['trade_quantity'], price):
                     config['position'] = 'BUY'
+        pass
+
+    def _trade_pairs(self) -> None:
+        for pair in self._trading_pairs:
+            current_distance = pair['spread']['return'].iloc[-1]
+            # print(f"current distance is {pair['spread']['return'].iloc[-1]} mean:{pair['mean']} std:{pair['std']}")
+
+            entry_threshold = pair['std'] * self._entry_treshold_ratio
+            exit_threshold = pair['std'] * self._exit_treshold_ratio
+
+            # enter position
+            if current_distance > pair['mean'] + entry_threshold:
+                print(f"Should buy {pair['asset1']} and sell {pair['asset2']}")
+                if not pair['init']:
+                    self._make_order(pair['asset1'], 'BUY', self._pairs_config[pair['asset1']]['trade_quantity'])
+                    self._pairs_config[pair['asset1']]['position'] = 'SELL'
+                    self._make_order(pair['asset2'], 'SELL', self._pairs_config[pair['asset2']]['trade_quantity'])
+                    self._pairs_config[pair['asset2']]['position'] = 'BUY'
+                    pair['init'] = True
+
+                if self._pairs_config[pair['asset1']]['position'] == 'BUY':
+                    self._make_order(pair['asset1'], 'BUY', self._pairs_config[pair['asset1']]['trade_quantity'])
+                    self._pairs_config[pair['asset1']]['position'] = 'SELL'
+                if self._pairs_config[pair['asset2']]['position'] == 'SELL':
+                    self._make_order(pair['asset2'], 'SELL', self._pairs_config[pair['asset2']]['trade_quantity'])
+                    self._pairs_config[pair['asset2']]['position'] = 'BUY'
+            # enter position
+            elif current_distance < pair['mean'] - entry_threshold:
+                print(f"Should sell {pair['asset1']} and buy {pair['asset2']}")
+                if not pair['init']:
+                    self._make_order(pair['asset1'], 'SELL', self._pairs_config[pair['asset1']]['trade_quantity'])
+                    self._pairs_config[pair['asset1']]['position'] = 'BUY'
+                    self._make_order(pair['asset2'], 'BUY', self._pairs_config[pair['asset2']]['trade_quantity'])
+                    self._pairs_config[pair['asset2']]['position'] = 'SELL'
+                    pair['init'] = True
+
+                if self._pairs_config[pair['asset1']]['position'] == 'SELL':
+                    self._make_order(pair['asset1'], 'SELL', self._pairs_config[pair['asset1']]['trade_quantity'])
+                    self._pairs_config[pair['asset1']]['position'] = 'BUY'
+                if self._pairs_config[pair['asset2']]['position'] == 'BUY':
+                    self._make_order(pair['asset2'], 'BUY', self._pairs_config[pair['asset2']]['trade_quantity'])
+                    self._pairs_config[pair['asset2']]['position'] = 'SELL'
+            # exit position
+            elif abs(current_distance) < exit_threshold:
+                
+                print("CLOSING POSITION IF ENTERED")
+                if self._pairs_config[pair['asset1']]['position'] == 'SELL':
+                    self._make_order(pair['asset1'], 'SELL', self._pairs_config[pair['asset1']]['trade_quantity'])
+                    self._pairs_config[pair['asset1']]['position'] = 'BUY'
+                if self._pairs_config[pair['asset2']]['position'] == 'SELL':
+                    self._make_order(pair['asset2'], 'SELL', self._pairs_config[pair['asset2']]['trade_quantity'])
+                    # config['position'] = 'BUY'
+                    self._pairs_config[pair['asset2']]['position'] = 'BUY'
+                pass
+            print("NOTHING")
+
         pass
 
     # HELPER FUNC END
@@ -211,6 +327,7 @@ class Robot:
         close_price_index = 4
         for symbol in self._pairs_data:
             klines = self._client.get_historical_klines(symbol, self._interval, limit=limit)
+            assert (len(klines) == limit)
             if self._pairs_data[symbol]['price_list']:
                 self._pairs_data[symbol]['price_list'].pop()
             for kline in klines:
@@ -233,6 +350,9 @@ class Robot:
                 # append neweset price to the end
                 self._pairs_data[symbol]['df'] = pd.concat([self._pairs_data[symbol]['df'], df],
                                                            ignore_index=True)
+            if limit == 1000 and self._strategy == PT_STRATEGY:
+                # 2023-05-03 FIRST CLOSE PRICE IS TOO HIGH FOR BTC so just removing first element of each DF
+                self._pairs_data[symbol]['df'] = self._pairs_data[symbol]['df'].iloc[1:]
         pass
 
     def _get_symbol_orders(self, symbol) -> dict:
@@ -286,6 +406,7 @@ class Robot:
         order_completed = False
         while not order_completed and retries < ORDER_MAX_RETRIES:
             try:
+                print(f"Trading {symbol} for {side} and {price}")
                 response = self._client.create_order(
                     symbol=symbol,
                     side=side,
@@ -301,7 +422,7 @@ class Robot:
             except exceptions.BinanceOrderException as e:
                 print(e.message)
             retries += 1
-            time.sleep(ORDER_RETRY_WAIT_TIME)
+            time.sleep(ORDER_RETRY_WAIT_TIME_S)
         return order_completed
 
     # OTHER API CALLS END
@@ -342,7 +463,7 @@ class Robot:
 
     def _print_symbol_orders(self) -> None:
         symbol = input("Enter symbol: ")
-        last_n_items = 5
+        last_n_items = int(input("Enter how many last orders to print: "))
         orders = self._get_symbol_orders(symbol=symbol)
         if orders:
             orders = orders[-last_n_items:]
@@ -389,6 +510,21 @@ class Robot:
 
             graph_orders(symbol, orders_df, prices_df)
 
+    def _try_to_make_order(self) -> None:
+        print("Will be placing market order!")
+        symbol = input("Enter symbol: ")
+        side = input("Enter side: ")
+        qty = input("Enter quantity: ")
+        response = self._client.create_order(
+            symbol=symbol,
+            side=side,
+            type=Client.ORDER_TYPE_MARKET,
+            quantity=qty,
+        )
+        if response['status'] == Client.ORDER_STATUS_FILLED:
+            print("Order placed")
+        else:
+            print("Failed to make order")
     # MENU OPTIONS END
 
 
@@ -398,40 +534,64 @@ config_schema = {
     "properties": {
         "api_key": {"type": "string"},
         "api_secret": {"type": "string"},
-        "timeout": {"type": "integer", "minimum": MIN_MENU_TIMEOUT, "maximum": MAX_MENU_TIMEOUT},
+        "timeout": {"type": "integer", "minimum": MIN_MENU_TIMEOUT_S, "maximum": MAX_MENU_TIMEOUT_S},
         "interval": {"enum": ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "8h", "12h", "1d", "3d", "1w", "1M"]},
         "strategy": {
             "type": "string",
-            "enum": [TENDENCY_STRATEGY, MEAN_STRATEGY]
+            "enum": [TENDENCY_STRATEGY, MEAN_STRATEGY, PT_STRATEGY]
         },
         "long_term": {
             "type": "integer",
-            "minimum": MIN_LONG_TERM_SMA,
-            "if": {
-                "properties": {
-                    "strategy": {
-                        "enum": [MEAN_STRATEGY]
-                    }
-                }
-            },
-            "then": {
-                "required": ["long_term"]
-            }
+            "minimum": MIN_LONG_TERM_SMA
         },
         "short_term": {
             "type": "integer",
-            "minimum": MIN_SHORT_TERM_SMA,
-            "if": {
+            "minimum": MIN_SHORT_TERM_SMA
+        },
+        "band": {
+            "type": "number",
+            "format": "float",
+            "minimum": MIN_LONG_TERM_BAND,
+            "maximum": MAX_LONG_TERM_BAND
+        },
+        "entry_treshold": {
+            "type": "number",
+            "format": "float",
+            "minimum": MIN_ENTRY_TRESHOLD,
+            "maximum": MAX_ENTRY_TRESHOLD
+        },
+        "exit_treshold": {
+            "type": "number",
+            "format": "float",
+            "minimum": MIN_EXIT_TRESHOLD,
+            "maximum": MAX_EXIT_TRESHOLD
+        },
+        "pairs": {
+            "type": "array",
+            "minProperties": Robot.MIN_PAIRS,
+            "maxProperties": Robot.MAX_PAIRS,
+            "items": {
+                "type": "object",
                 "properties": {
-                    "strategy": {
-                        "enum": [MEAN_STRATEGY]
-                    }
-                }
-            },
-            "then": {
-                "required": ["short_term"]
+                    "asset1": {},
+                    "asset2": {}
+                },
+                "required": ["asset1", "asset2"],
+                "additionalProperties": False
             }
         }
+    },
+    "if": {
+        "properties": {"strategy": {"const": "MEAN_SMA"}}
+    },
+    "then": {
+        "required": ["long_term", "short_term", "band"]
+    },
+    "if": {
+        "properties": {"strategy": {"const": "PT_STRATEGY"}}
+    },
+    "then": {
+        "required": ["entry_treshold", "exit_treshold", "pairs"]
     },
     "additionalProperties": False
 }
